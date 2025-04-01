@@ -1,16 +1,17 @@
-vpc_cidr             = "10.0.0.0/16"
-public_subnets_cidr  = ["10.0.101.0/24", "10.0.102.0/24", "10.0.103.0/24"]
-availability_zones   = ["us-east-1a", "us-east-1b", "us-east-1c"]
-vpc_name             = "game-server-vpc"
+vpc_cidr            = "10.0.0.0/16"
+public_subnets_cidr = ["10.0.101.0/24", "10.0.102.0/24", "10.0.103.0/24"]
+availability_zones  = ["us-east-1a", "us-east-1b", "us-east-1c"]
+vpc_name            = "game-server-vpc"
 
-game_port   = 27015
-ssh_cidr    = "TU_IP_O_RANGO_DE_IP" # Reemplaza con tu IP o rango de IP seguro
-audio_port  = 10000
-game_protocol = "udp"
+security_group_name = "game-server-sg"
+game_port           = 27015
+ssh_cidr            = "0.0.0.0/0"
+audio_port          = 10000
+game_protocol       = "udp"
 
-ami_id            = "ami-TU_AMI_ID" # Reemplaza con la AMI correcta
-instance_type     = "t4g.small"
+ami_id        = "ami-TU_AMI_ID" # Reemplaza con la AMI correcta
+instance_type = "t4g.small"
 
-user_pool_name = "game-users"
+user_pool_name  = "game-users"
 app_client_name = "game-client"
 admin_role_name = "game-admin-role"

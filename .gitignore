@@ -172,3 +172,27 @@ cython_debug/
 
 # PyPI configuration file
 .pypirc
+
+
+# Terraform state files
+*.tfstate
+*.tfstate.*
+
+# Terraform crash logs
+crash.log
+
+# Terraform plan files
+*.tfplan
+
+# Terraform provider plugins
+.terraform/
+
+# Terraform lock file
+.terraform.lock.hcl
+
+# Archivos de configuración local
+terraform.tfvars
+*.auto.tfvars
+
+# AWS
+aws

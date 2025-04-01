@@ -8,7 +8,7 @@ resource "aws_security_group" "game_sg" {
     from_port   = var.game_port
     to_port     = var.game_port
     protocol    = var.game_protocol
-    cidr_blocks = ["0.0.0.0/0"] # Permite el tráfico desde cualquier IP
+    cidr_blocks = var.allowed_game_ips
   }
 
   ingress {
@@ -16,29 +16,27 @@ resource "aws_security_group" "game_sg" {
     from_port   = 22
     to_port     = 22
     protocol    = "tcp"
-    cidr_blocks = [var.ssh_cidr] # Limita el acceso SSH a tu IP o rango de IP
+    cidr_blocks = [var.ssh_cidr]
   }
 
   ingress {
     description = "Audio chat"
     from_port   = var.audio_port
     to_port     = var.audio_port
-    protocol    = "udp" # Usamos UDP para audio
-    cidr_blocks = ["0.0.0.0/0"] # Permite el tráfico desde cualquier IP
+    protocol    = "udp"
+    cidr_blocks = var.allowed_audio_ips
   }
 
   egress {
-    from_port   = 0
-    to_port     = 0
-    protocol    = "-1"
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
   }
 
   tags = {
-    Name = "game-server-sg"
+    Name        = var.security_group_name
+    Project     = "GameServer"
+    Owner       = "DevOps Team"
   }
-}
-
-output "game_server_sg_id" {
-  value = aws_security_group.game_server.id
 }

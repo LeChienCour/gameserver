@@ -22,3 +22,18 @@ variable "game_protocol" {
   description = "Protocol for the game server (tcp or udp)"
   type        = string
 }
+
+variable "security_group_name" {
+  description = "Name of the security group for the instance"
+  type        = string
+}
+
+variable "allowed_game_ips" {
+  description = "List of IPs allowed for game"
+  type        = list(string)
+}
+
+variable "allowed_audio_ips" {
+  description = "List of IPs allowed for audio"
+  type        = list(string)
+}

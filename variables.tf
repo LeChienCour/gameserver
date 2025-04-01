@@ -50,13 +50,8 @@ variable "instance_type" {
   type        = string
 }
 
-variable "subnet_id" {
-  description = "ID of the subnet for the instance"
-  type        = string
-}
-
-variable "security_group_id" {
-  description = "ID of the security group for the instance"
+variable "security_group_name" {
+  description = "Name of the security group for the instance"
   type        = string
 }
 
@@ -71,6 +66,12 @@ variable "app_client_name" {
 }
 
 variable "admin_role_name" {
-    description = "Name of the admin role"
-    type = string
+  description = "Name of the admin role"
+  type        = string
+}
+
+variable "region" {
+  description = "AWS Region"
+  type        = string
+  default     = "us-east-1"
 }
