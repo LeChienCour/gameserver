@@ -9,7 +9,7 @@ ssh_cidr            = "0.0.0.0/0"
 audio_port          = 10000
 game_protocol       = "udp"
 
-ami_id        = "ami-TU_AMI_ID" # Reemplaza con la AMI correcta
+ami_id        = "ami-0e3faa5e960844571"
 instance_type = "t4g.small"
 
 user_pool_name  = "game-users"
