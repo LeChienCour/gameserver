@@ -16,7 +16,7 @@ resource "aws_instance" "game_server" {
 
 resource "aws_eip" "game_server_eip" {
   instance = aws_instance.game_server.id
-  vpc      = true
+  domain   = "vpc"
 
   tags = {
     Name = "game-server-eip"

@@ -12,7 +12,7 @@ terraform {
   required_providers {
     aws = {
       source  = "hashicorp/aws"
-      version = "~> 4.0"
+      version = "~> 5.0"
     }
   }
 }
@@ -55,4 +55,11 @@ module "cognito" {
   user_pool_name  = var.user_pool_name
   app_client_name = var.app_client_name
   admin_role_name = var.admin_role_name
+}
+
+module "appsync" {
+  source             = "./modules/appsync"
+  user_pool_id       = module.cognito.user_pool_id
+  region             = var.region
+  bucket_domain_name = module.appsync.audio_bucket_domain_name
 }
