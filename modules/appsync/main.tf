@@ -5,12 +5,19 @@ resource "random_string" "bucket_suffix" {
 }
 
 resource "aws_s3_bucket" "audio_bucket" {
-  bucket = "gameserver-voice-chat-audio-${random_string.bucket_suffix.result}"
+  bucket             = "gameserver-voice-chat-audio-${random_string.bucket_suffix.result}"
+  object_lock_enabled = true
 }
 
-resource "aws_s3_bucket_acl" "audio_bucket_acl" {
+resource "aws_s3_bucket_object_lock_configuration" "audio_bucket_lock" {
   bucket = aws_s3_bucket.audio_bucket.id
-  acl    = "private"
+
+  rule {
+    default_retention {
+      mode  = "GOVERNANCE"
+      days  = 30
+    }
+  }
 }
 
 resource "aws_s3_bucket_versioning" "audio_bucket_versioning" {
@@ -21,13 +28,17 @@ resource "aws_s3_bucket_versioning" "audio_bucket_versioning" {
 }
 
 resource "aws_appsync_graphql_api" "voice_chat_api" {
-  name            = var.api_name
+  name                = var.api_name
   authentication_type = "AMAZON_COGNITO_USER_POOLS"
 
   user_pool_config {
-    user_pool_id      = var.user_pool_id
-    aws_region        = var.region
-    default_action    = "ALLOW"
+    user_pool_id   = var.user_pool_id
+    aws_region     = var.region
+    default_action = "ALLOW"
+  }
+
+  additional_authentication_provider {
+    authentication_type = "API_KEY"
   }
 
   schema = <<EOF
@@ -54,22 +65,32 @@ resource "aws_appsync_graphql_api" "voice_chat_api" {
   EOF
 }
 
+resource "aws_appsync_api_key" "voice_chat_api_key" {
+  api_id      = aws_appsync_graphql_api.voice_chat_api.id
+  description = "API Key for Voice Chat API for Testing"
+}
+
+resource "aws_appsync_api_key" "voice_chat_api_default_key" {
+  api_id      = aws_appsync_graphql_api.voice_chat_api.id
+  description = "Default API Key for Voice Chat API"
+}
+
 resource "aws_appsync_datasource" "s3_datasource" {
   api_id = aws_appsync_graphql_api.voice_chat_api.id
   name   = "s3Datasource"
   type   = "HTTP"
 
   http_config {
-    endpoint = aws_s3_bucket.audio_bucket.bucket_domain_name
+    endpoint = "https://${aws_s3_bucket.audio_bucket.bucket_regional_domain_name}" 
   }
 }
 
 resource "aws_appsync_resolver" "get_audio_resolver" {
-  api_id           = aws_appsync_graphql_api.voice_chat_api.id
-  field            = "getAudio"
-  type             = "Query"
-  data_source      = aws_appsync_datasource.s3_datasource.name
-  request_template = <<EOF
+  api_id            = aws_appsync_graphql_api.voice_chat_api.id
+  field             = "getAudio"
+  type              = "Query"
+  data_source       = aws_appsync_datasource.s3_datasource.name
+  request_template  = <<EOF
     {
       "version": "2018-05-29",
       "operation": "GET",
@@ -86,11 +107,11 @@ resource "aws_appsync_resolver" "get_audio_resolver" {
 }
 
 resource "aws_appsync_resolver" "send_audio_resolver" {
-  api_id           = aws_appsync_graphql_api.voice_chat_api.id
-  field            = "sendAudio"
-  type             = "Mutation"
-  data_source      = aws_appsync_datasource.s3_datasource.name
-  request_template = <<EOF
+  api_id            = aws_appsync_graphql_api.voice_chat_api.id
+  field             = "sendAudio"
+  type              = "Mutation"
+  data_source       = aws_appsync_datasource.s3_datasource.name
+  request_template  = <<EOF
     {
       "version": "2018-05-29",
       "operation": "PUT",

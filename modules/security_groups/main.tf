@@ -35,8 +35,8 @@ resource "aws_security_group" "game_sg" {
   }
 
   tags = {
-    Name        = var.security_group_name
-    Project     = "GameServer"
-    Owner       = "DevOps Team"
+    Name    = var.security_group_name
+    Project = "GameServer"
+    Owner   = "DevOps Team"
   }
 }

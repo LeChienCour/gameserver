@@ -58,8 +58,7 @@ module "cognito" {
 }
 
 module "appsync" {
-  source             = "./modules/appsync"
-  user_pool_id       = module.cognito.user_pool_id
-  region             = var.region
-  bucket_domain_name = module.appsync.audio_bucket_domain_name
+  source       = "./modules/appsync"
+  user_pool_id = module.cognito.user_pool_id
+  region       = var.region
 }

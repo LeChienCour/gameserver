@@ -9,6 +9,6 @@ variable "app_client_name" {
 }
 
 variable "admin_role_name" {
-    description = "Name of the admin role"
-    type = string
+  description = "Name of the admin role"
+  type        = string
 }

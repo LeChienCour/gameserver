@@ -1,7 +1,7 @@
 variable "ami_id" {
   description = "AMI ID for the game server"
   type        = string
-  default = "ami-0e3faa5e960844571" // Amazon Linux 2 AMI (HVM) 64-bit (Arm)
+  default     = "ami-0e3faa5e960844571" // Amazon Linux 2 AMI (HVM) 64-bit (Arm)
 }
 
 variable "instance_type" {
@@ -20,5 +20,5 @@ variable "security_group_id" {
 }
 variable "game_port" {
   description = "Port for the game server"
-  type = number
+  type        = number
 }
