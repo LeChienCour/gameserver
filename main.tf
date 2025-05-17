@@ -62,3 +62,10 @@ module "appsync" {
   user_pool_id = module.cognito.user_pool_id
   region       = var.region
 }
+
+module "ssm" {
+  source          = "./modules/ssm"
+  graphql_api_id  = module.appsync.graphql_api_id
+  graphql_api_uri = module.appsync.graphql_api_uri
+  api_key_value   = module.appsync.api_key_value
+}
