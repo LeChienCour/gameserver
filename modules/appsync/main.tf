@@ -167,10 +167,10 @@ EOF
 }
 
 resource "aws_appsync_resolver" "send_audio_resolver" {
-  api_id      = aws_appsync_graphql_api.voice_chat_api.id
+  api_id      = aws_appsync_graphql_api.voice_chat_api.id # Or module.appsync.aws_appsync_graphql_api.voice_chat_api.id
   type        = "Mutation"
   field       = "sendAudio"
-  data_source = aws_appsync_datasource.s3_datasource.name
+  data_source = module.appsync.aws_appsync_datasource.s3_datasource.name # Or "s3Datasource" directly if not in module output
 
   request_template = <<EOF
 {
@@ -189,38 +189,19 @@ EOF
   response_template = <<EOF
 #if($context.result.statusCode == 200)
   {
-    "format": "$context.arguments.format",
-    "encoding": "$context.arguments.encoding",
-    "data": "$context.arguments.data",
-    "author": "$context.arguments.author",
-    "timestamp": "$context.arguments.timestamp"
+    "format": "$util.toJson($context.arguments.format)",
+    "encoding": "$util.toJson($context.arguments.encoding)",
+    "data": "$util.toJson($context.arguments.data)",
+    "author": "$util.toJson($context.arguments.author)",
+    "timestamp": "$util.toJson($context.arguments.timestamp)",
+    "method": "$util.toJson($context.arguments.method)" # <<<< ADD THIS LINE
   }
 #else
-  $util.error("Failed to save audio", "AudioSaveError")
+  #if($context.error)
+    $util.error($context.error.message, $context.error.type)
+  #else
+    $util.error("Failed to save audio: " + $context.result.body, "AudioSaveError-" + $context.result.statusCode)
+  #end
 #end
-EOF
-}
-
-resource "aws_appsync_datasource" "none" {
-  api_id = aws_appsync_graphql_api.voice_chat_api.id
-  name   = "NONE"
-  type   = "NONE"
-}
-
-resource "aws_appsync_resolver" "onreceive_audio_resolver" {
-  api_id      = aws_appsync_graphql_api.voice_chat_api.id
-  type        = "Subscription"
-  field       = "onReceiveAudio"
-  data_source = aws_appsync_datasource.none.name
-
-  request_template = <<EOF
-{
-    "version": "2018-05-29",
-    "payload": {}
-}
-EOF
-
-  response_template = <<EOF
-$util.toJson($context.result)
 EOF
 }
