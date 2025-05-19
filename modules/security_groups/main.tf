@@ -1,42 +1,45 @@
-resource "aws_security_group" "game_sg" {
-  name        = "game-server-sg"
-  description = "Security group for game server"
+resource "aws_security_group" "game_server" {
+  name        = var.security_group_name
+  description = "Security group for game server with WebSocket support"
   vpc_id      = var.vpc_id
 
+  # Game Server Port
   ingress {
-    description = "Game server traffic"
     from_port   = var.game_port
     to_port     = var.game_port
-    protocol    = var.game_protocol
+    protocol    = "tcp"
     cidr_blocks = var.allowed_game_ips
+    description = "Game server port"
   }
 
+  # WebSocket Port
   ingress {
-    description = "SSH access"
+    from_port   = var.websocket_port
+    to_port     = var.websocket_port
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+    description = "WebSocket server port"
+  }
+
+  # SSH Access
+  ingress {
     from_port   = 22
     to_port     = 22
     protocol    = "tcp"
     cidr_blocks = [var.ssh_cidr]
+    description = "SSH access"
   }
 
-  ingress {
-    description = "Audio chat"
-    from_port   = var.audio_port
-    to_port     = var.audio_port
-    protocol    = "udp"
-    cidr_blocks = var.allowed_audio_ips
-  }
-
+  # All Outbound Traffic
   egress {
-    from_port   = 443
-    to_port     = 443
-    protocol    = "tcp"
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
     cidr_blocks = ["0.0.0.0/0"]
+    description = "Allow all outbound traffic"
   }
 
   tags = {
-    Name    = var.security_group_name
-    Project = "GameServer"
-    Owner   = "DevOps Team"
+    Name = var.security_group_name
   }
 }

@@ -1,183 +1,168 @@
-# GameServer Infrastructure
+# Game Server with Voice Chat Infrastructure
 
-This project provides Infrastructure as Code (IaC) using Terraform to deploy a game server infrastructure in AWS. The infrastructure includes a GraphQL API (AppSync), authentication (Cognito), and necessary networking components.
+This repository contains Terraform configurations for deploying a game server with real-time voice chat capabilities using AWS services.
 
 ## Architecture Overview
 
-The infrastructure consists of the following main components:
+The infrastructure consists of the following components:
 
-- **VPC and Networking**: Custom VPC with public subnets and internet gateway
-- **EC2 Game Server**: Instance running the game server application
-- **AppSync API**: GraphQL API for game data management
-- **Cognito**: User authentication and authorization
-- **SSM Parameters**: Secure storage for API credentials and endpoints
-- **Security Groups**: Network access control
+### Core Components
+- **EC2 Game Server**: Central hub for game and voice chat functionality
+  - Handles WebSocket connections for real-time communication
+  - Manages voice chat channels and audio routing
+  - Runs the game server application
+
+### Authentication & Security
+- **Amazon Cognito**: User authentication and management
+  - User pools for player accounts
+  - Secure token-based authentication
+  - Integration with the game server
+
+### Real-time Communication
+- **WebSocket API Gateway**: Manages real-time connections
+  - Handles WebSocket connections (`$connect`)
+  - Processes messages (`$default`)
+  - Manages disconnections (`$disconnect`)
+  - Routes traffic to the EC2 instance
+
+### Network & Security
+- **VPC**: Isolated network environment
+  - Public subnets for internet-facing resources
+  - Security groups for access control
+  - Network ACLs for additional security
+
+### Configuration Management
+- **Systems Manager Parameter Store**: Secure configuration storage
+  - Cognito configuration
+  - WebSocket endpoints
+  - Environment variables
 
 ## Prerequisites
 
-Before deploying this infrastructure, ensure you have:
-
-1. [AWS CLI](https://aws.amazon.com/cli/) installed and configured
-2. [Terraform](https://www.terraform.io/downloads.html) (version >= 1.0.0)
-3. An AWS account with appropriate permissions
-4. A S3 bucket for Terraform state (see below)
-5. A DynamoDB table for state locking (see below)
-
-## Initial Setup
-
-### 1. Create State Backend Resources
-
-Before deploying the infrastructure, create the following resources for Terraform state management:
-
-```bash
-# Create S3 bucket for state
-aws s3 mb s3://devops-t2-gameserver-tfstate --region us-east-1
-
-# Create DynamoDB table for state locking
-aws dynamodb create-table \
-    --table-name terraform-state-locks \
-    --attribute-definitions AttributeName=LockID,AttributeType=S \
-    --key-schema AttributeName=LockID,KeyType=HASH \
-    --provisioned-throughput ReadCapacityUnits=1,WriteCapacityUnits=1 \
-    --region us-east-1
-```
-
-### 2. Configure Variables
-
-Create a `terraform.tfvars` file with your specific values:
-
-```hcl
-region              = "us-east-1"
-vpc_cidr            = "10.0.0.0/16"
-public_subnets_cidr = ["10.0.1.0/24", "10.0.2.0/24"]
-availability_zones  = ["us-east-1a", "us-east-1b"]
-vpc_name           = "gameserver-vpc"
-game_port          = 7777
-audio_port         = 7000
-ssh_cidr           = "0.0.0.0/0"  # Restrict this to your IP in production
-game_protocol      = "udp"
-instance_type      = "t3.medium"
-security_group_name = "game-server-sg"
-user_pool_name     = "gameserver-users"
-app_client_name    = "gameserver-client"
-admin_role_name    = "gameserver-admin"
-```
-
-## Deployment
-
-Follow these steps to deploy the infrastructure:
-
-1. Initialize Terraform:
-   ```bash
-   terraform init
-   ```
-
-2. Review the deployment plan:
-   ```bash
-   terraform plan
-   ```
-
-3. Apply the configuration:
-   ```bash
-   terraform apply
-   ```
-
-4. After successful deployment, you can retrieve the important information:
-   ```bash
-   # Get the GraphQL API endpoint
-   aws ssm get-parameter --name "/gameserver/appsync/graphql_api_uri"
-
-   # Get the Game Server IP
-   terraform output game_server_public_ip
-   ```
+- AWS CLI configured with appropriate credentials
+- Terraform v1.0.0 or later
+- Node.js and npm (for local development)
 
 ## Infrastructure Components
 
 ### VPC Module
-- Creates a custom VPC with public subnets
-- Sets up internet gateway and routing
-- Enables DNS support and hostnames
+- Custom VPC with public subnets
+- Internet Gateway for public access
+- Route tables for network routing
 
-### Security Groups Module
-- Configures network access for the game server
-- Allows game traffic on specified port
-- Allows SSH access (configurable)
-- Enables audio chat communication
+### Security Groups
+- Game server port (default: 25565)
+- WebSocket port (default: 8080)
+- SSH access (port 22)
+- Outbound internet access
 
-### EC2 Game Server Module
-- Deploys the game server instance
-- Associates an Elastic IP
-- Configurable instance type and AMI
+### EC2 Instance
+- Amazon Linux 2 or Ubuntu AMI
+- Node.js runtime
+- IAM role with necessary permissions
+- User data script for application setup
 
-### Cognito Module
-- Sets up user authentication
-- Creates user pool and app client
-- Configures password policies and verification
+### Cognito
+- User pool for player accounts
+- App client for application integration
+- Admin role for management
 
-### AppSync Module
-- Creates GraphQL API
-- Sets up API authentication
-- Configures API key for testing
+### WebSocket API
+- Custom domain (optional)
+- Stage for deployment
+- Integration with EC2 instance
+- CloudWatch logging
 
-### SSM Module
-- Stores sensitive configuration securely
-- Manages API endpoints and credentials
-- Enables easy access to infrastructure information
+## Deployment
+
+1. **Initialize Terraform**:
+   ```bash
+   terraform init
+   ```
+
+2. **Configure Variables**:
+   - Copy `terraform.tfvars.example` to `terraform.tfvars`
+   - Update the variables with your values
+
+3. **Plan Deployment**:
+   ```bash
+   terraform plan
+   ```
+
+4. **Apply Configuration**:
+   ```bash
+   terraform apply
+   ```
+
+## Configuration
+
+### Required Variables
+- `ami_id`: AMI ID for the EC2 instance
+- `instance_type`: EC2 instance type
+- `vpc_cidr`: CIDR block for VPC
+- `public_subnets_cidr`: CIDR blocks for public subnets
+- `availability_zones`: AWS availability zones
+
+### Optional Variables
+- `game_port`: Game server port (default: 25565)
+- `websocket_port`: WebSocket server port (default: 8080)
+- `ssh_cidr`: SSH access CIDR (default: 0.0.0.0/0)
+- `environment`: Environment name (default: dev)
+- `project_name`: Project name (default: game-server)
 
 ## Security Considerations
 
-1. Restrict SSH access (`ssh_cidr`) to specific IP ranges
-2. Use appropriate instance types based on load
-3. Regularly rotate API keys
-4. Monitor AWS CloudWatch logs
-5. Keep Terraform and provider versions updated
+1. **Network Security**
+   - Security groups restrict access to necessary ports
+   - VPC provides network isolation
+   - SSH access should be restricted to specific IPs
 
-## Cost Considerations
+2. **Authentication**
+   - Cognito provides secure user authentication
+   - IAM roles follow principle of least privilege
+   - WebSocket connections require valid tokens
 
-This infrastructure includes several AWS services that incur costs:
+3. **Data Protection**
+   - All sensitive data stored in SSM Parameter Store
+   - WebSocket connections use WSS (secure WebSocket)
+   - Cognito tokens for secure communication
 
-- EC2 instance (hourly charges)
-- AppSync API (request-based pricing)
-- Cognito (MAU-based pricing)
-- EIP (charged when not associated with running instance)
-- Data transfer charges
+## Monitoring and Logging
+
+- CloudWatch Logs for WebSocket API
+- CloudWatch Metrics for EC2 instance
+- CloudWatch Alarms for critical metrics
+- Log retention period: 30 days (configurable)
 
 ## Maintenance
 
-### Updating Infrastructure
-```bash
-# Get latest changes
-git pull
+### Updating the Infrastructure
+1. Modify the Terraform configuration
+2. Run `terraform plan` to review changes
+3. Apply changes with `terraform apply`
 
-# Plan changes
-terraform plan
-
-# Apply changes
-terraform apply
-```
-
-### Destroying Infrastructure
-```bash
-terraform destroy
-```
+### Scaling
+- EC2 instance type can be modified
+- WebSocket API can be configured for auto-scaling
+- Security groups can be updated for new requirements
 
 ## Troubleshooting
 
-1. **State Lock Issues**:
-   ```bash
-   # Force unlock if needed
-   terraform force-unlock [LOCK_ID]
-   ```
+### Common Issues
+1. **WebSocket Connection Failures**
+   - Check security group rules
+   - Verify WebSocket API configuration
+   - Check EC2 instance status
 
-2. **Connection Issues**:
-   - Verify security group rules
-   - Check instance status
-   - Validate network configuration
-
-3. **API Issues**:
+2. **Authentication Issues**
    - Verify Cognito configuration
-   - Check AppSync schema
-   - Validate API key permissions
+   - Check IAM role permissions
+   - Validate token handling
+
+3. **Performance Issues**
+   - Monitor EC2 instance metrics
+   - Check WebSocket API metrics
+   - Review CloudWatch logs
 
 ## Contributing
 
@@ -189,4 +174,4 @@ terraform destroy
 
 ## License
 
-This project is released under the Unlicense. See the [LICENSE](LICENSE) file for details.
+This project is licensed under the MIT License - see the LICENSE file for details.
