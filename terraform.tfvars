@@ -15,3 +15,10 @@ instance_type = "t4g.small"
 user_pool_name  = "game-users"
 app_client_name = "game-client"
 admin_role_name = "game-admin-role"
+
+# EventBridge Configuration
+eventbridge_prefix            = "voice-chat"
+eventbridge_bus_name          = "voice-chat-event-bus"
+eventbridge_event_source      = "appsync.voicechat"
+eventbridge_event_detail_type = "SendAudioEvent"
+eventbridge_log_retention_days = 30

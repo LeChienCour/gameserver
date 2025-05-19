@@ -166,23 +166,39 @@ EOF
 EOF
 }
 
+module "eventbridge" {
+  source = "../eventbridge"
+
+  appsync_api_id = aws_appsync_graphql_api.voice_chat_api.id
+  prefix         = "voice-chat"
+}
+
+# Add the sendAudio resolver using EventBridge data source
 resource "aws_appsync_resolver" "send_audio_resolver" {
-  api_id      = aws_appsync_graphql_api.voice_chat_api.id # Or module.appsync.aws_appsync_graphql_api.voice_chat_api.id
+  api_id      = aws_appsync_graphql_api.voice_chat_api.id
   type        = "Mutation"
   field       = "sendAudio"
-  data_source = module.appsync.aws_appsync_datasource.s3_datasource.name # Or "s3Datasource" directly if not in module output
+  data_source = module.eventbridge.eventbridge_datasource_name
 
   request_template = <<EOF
 {
   "version": "2018-05-29",
-  "method": "PUT",
-  "resourcePath": "/audios/$util.urlEncode($context.arguments.channel)/$util.urlEncode($context.arguments.timestamp).audio",
-  "params": {
-    "headers": {
-      "Content-Type": "$util.escapeJavaScript($context.arguments.format)"
-    },
-    "body": "$util.escapeJavaScript($context.arguments.data)"
-  }
+  "operation": "PutEvents",
+  "events": [
+    {
+      "source": "${module.eventbridge.event_source}",
+      "detail-type": "${module.eventbridge.event_detail_type}",
+      "detail": {
+        "channel": "$util.escapeJavaScript($context.arguments.channel)",
+        "format": "$util.escapeJavaScript($context.arguments.format)",
+        "encoding": "$util.escapeJavaScript($context.arguments.encoding)",
+        "data": "$util.escapeJavaScript($context.arguments.data)",
+        "author": "$util.escapeJavaScript($context.arguments.author)",
+        "timestamp": "$util.escapeJavaScript($context.arguments.timestamp)",
+        "method": "$util.escapeJavaScript($context.arguments.method)"
+      }
+    }
+  ]
 }
 EOF
 
@@ -194,13 +210,13 @@ EOF
     "data": "$util.toJson($context.arguments.data)",
     "author": "$util.toJson($context.arguments.author)",
     "timestamp": "$util.toJson($context.arguments.timestamp)",
-    "method": "$util.toJson($context.arguments.method)" # <<<< ADD THIS LINE
+    "method": "$util.toJson($context.arguments.method)"
   }
 #else
   #if($context.error)
     $util.error($context.error.message, $context.error.type)
   #else
-    $util.error("Failed to save audio: " + $context.result.body, "AudioSaveError-" + $context.result.statusCode)
+    $util.error("Failed to send audio event", "EventBridgeError")
   #end
 #end
 EOF

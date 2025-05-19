@@ -63,6 +63,17 @@ module "appsync" {
   region       = var.region
 }
 
+module "eventbridge" {
+  source = "./modules/eventbridge"
+
+  appsync_api_id     = module.appsync.graphql_api_id
+  prefix             = var.eventbridge_prefix
+  event_bus_name     = var.eventbridge_bus_name
+  event_source       = var.eventbridge_event_source
+  event_detail_type  = var.eventbridge_event_detail_type
+  log_retention_days = var.eventbridge_log_retention_days
+}
+
 module "ssm" {
   source          = "./modules/ssm"
   graphql_api_id  = module.appsync.graphql_api_id

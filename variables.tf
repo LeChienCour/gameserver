@@ -75,3 +75,34 @@ variable "region" {
   type        = string
   default     = "us-east-1"
 }
+
+# EventBridge variables
+variable "eventbridge_prefix" {
+  description = "Prefix to be used for EventBridge resource names"
+  type        = string
+  default     = "voice-chat"
+}
+
+variable "eventbridge_bus_name" {
+  description = "Name of the custom EventBridge event bus"
+  type        = string
+  default     = "voice-chat-event-bus"
+}
+
+variable "eventbridge_event_source" {
+  description = "Source identifier for EventBridge events"
+  type        = string
+  default     = "appsync.voicechat"
+}
+
+variable "eventbridge_event_detail_type" {
+  description = "Detail type for EventBridge events"
+  type        = string
+  default     = "SendAudioEvent"
+}
+
+variable "eventbridge_log_retention_days" {
+  description = "Number of days to retain CloudWatch logs for EventBridge events"
+  type        = number
+  default     = 30
+}
