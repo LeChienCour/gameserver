@@ -28,4 +28,12 @@ resource "aws_ssm_parameter" "websocket_stage_url" {
   description = "WebSocket Stage URL"
   type        = "String"
   value       = var.websocket_stage_url
+}
+
+# SSM Parameter for WebSocket API Key
+resource "aws_ssm_parameter" "websocket_api_key" {
+  name        = "/game-server/websocket/api-key"
+  description = "WebSocket API Key"
+  type        = "SecureString"
+  value       = var.websocket_api_key
 } 

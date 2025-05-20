@@ -16,4 +16,10 @@ variable "websocket_api_id" {
 variable "websocket_stage_url" {
   description = "WebSocket Stage URL"
   type        = string
+}
+
+variable "websocket_api_key" {
+  description = "API key for WebSocket API authentication"
+  type        = string
+  sensitive   = true
 } 

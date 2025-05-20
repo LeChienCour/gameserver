@@ -144,10 +144,11 @@ module "ssm" {
   source = "./modules/ssm"
   
   # Cognito Configuration
-  user_pool_id     = module.cognito.user_pool_id
+  user_pool_id        = module.cognito.user_pool_id
   user_pool_client_id = module.cognito.user_pool_client_id
   
   # WebSocket Configuration
-  websocket_api_id = module.websocket.websocket_api_id
+  websocket_api_id    = module.websocket.websocket_api_id
   websocket_stage_url = module.websocket.websocket_stage_url
+  websocket_api_key   = module.websocket.api_key
 }

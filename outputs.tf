@@ -121,6 +121,12 @@ output "ssm_websocket_stage_url_parameter" {
   value       = module.ssm.websocket_stage_url_parameter_name
 }
 
+output "ssm_websocket_api_key_parameter" {
+  description = "SSM parameter name for WebSocket API Key"
+  value       = module.ssm.websocket_api_key_parameter_name
+  sensitive   = true
+}
+
 # Configuration Details
 output "eventbridge_configuration" {
   description = "Complete EventBridge configuration for reference"
