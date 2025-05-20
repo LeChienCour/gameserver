@@ -196,3 +196,5 @@ terraform.tfvars
 
 # AWS
 aws
+
+lambda
