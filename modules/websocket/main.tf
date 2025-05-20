@@ -3,6 +3,9 @@ resource "aws_apigatewayv2_api" "websocket_api" {
   name                       = "${var.prefix}-websocket-api"
   protocol_type             = "WEBSOCKET"
   route_selection_expression = "$request.body.action"
+  
+  # Add API key authorization
+  api_key_selection_expression = "$request.header.x-api-key"
 }
 
 # API Key
@@ -17,11 +20,6 @@ resource "aws_api_gateway_usage_plan" "websocket" {
   api_stages {
     api_id = aws_apigatewayv2_api.websocket_api.id
     stage  = aws_apigatewayv2_stage.websocket_stage.name
-  }
-
-  quota_settings {
-    limit  = 1000000
-    period = "MONTH"
   }
 
   throttle_settings {
@@ -113,9 +111,15 @@ resource "aws_apigatewayv2_stage" "websocket_stage" {
     })
   }
 
+  default_route_settings {
+    throttling_burst_limit = 100
+    throttling_rate_limit  = 50
+    detailed_metrics_enabled = true
+  }
+
   depends_on = [
-    aws_api_gateway_account.this,
-    aws_cloudwatch_log_group.websocket_logs
+    aws_cloudwatch_log_group.websocket_logs,
+    aws_api_gateway_account.this
   ]
 }
 
@@ -168,6 +172,26 @@ resource "aws_lambda_function" "message" {
     variables = merge(
       {
         CONNECTIONS_TABLE = var.connections_table
+      },
+      var.lambda_environment_variables
+    )
+  }
+}
+
+resource "aws_lambda_function" "audio" {
+  filename         = var.lambda_functions.audio
+  function_name    = "${var.prefix}-audio"
+  role            = aws_iam_role.lambda_role.arn
+  handler         = "lambda_function.lambda_handler"
+  runtime         = "python3.10"
+  timeout         = 30
+  memory_size     = 256
+
+  environment {
+    variables = merge(
+      {
+        CONNECTIONS_TABLE = var.connections_table
+        EVENT_BUS_ARN    = var.event_bus_arn
       },
       var.lambda_environment_variables
     )
@@ -234,6 +258,16 @@ resource "aws_iam_role_policy" "lambda_policy" {
           "execute-api:ManageConnections"
         ]
         Resource = "${aws_apigatewayv2_api.websocket_api.execution_arn}/*"
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "s3:PutObject",
+          "s3:GetObject"
+        ]
+        Resource = [
+          "${var.audio_bucket_arn}/*"
+        ]
       }
     ]
   })
@@ -257,6 +291,13 @@ resource "aws_apigatewayv2_route" "sendaudio" {
   api_id    = aws_apigatewayv2_api.websocket_api.id
   route_key = "sendaudio"
   target    = "integrations/${aws_apigatewayv2_integration.message.id}"
+}
+
+# Route for handling audio messages
+resource "aws_apigatewayv2_route" "audio" {
+  api_id    = aws_apigatewayv2_api.websocket_api.id
+  route_key = "audio"
+  target    = "integrations/${aws_apigatewayv2_integration.audio.id}"
 }
 
 # Default route for any other action (optional)
@@ -285,6 +326,12 @@ resource "aws_apigatewayv2_integration" "message" {
   integration_uri  = aws_lambda_function.message.invoke_arn
 }
 
+resource "aws_apigatewayv2_integration" "audio" {
+  api_id           = aws_apigatewayv2_api.websocket_api.id
+  integration_type = "AWS_PROXY"
+  integration_uri  = aws_lambda_function.audio.invoke_arn
+}
+
 # Lambda Permissions
 resource "aws_lambda_permission" "connect" {
   statement_id  = "AllowAPIGatewayInvoke"
@@ -306,6 +353,14 @@ resource "aws_lambda_permission" "message" {
   statement_id  = "AllowAPIGatewayInvoke"
   action        = "lambda:InvokeFunction"
   function_name = aws_lambda_function.message.function_name
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "${aws_apigatewayv2_api.websocket_api.execution_arn}/*/*"
+}
+
+resource "aws_lambda_permission" "audio" {
+  statement_id  = "AllowAPIGatewayInvoke"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.audio.function_name
   principal     = "apigateway.amazonaws.com"
   source_arn    = "${aws_apigatewayv2_api.websocket_api.execution_arn}/*/*"
 } 

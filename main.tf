@@ -120,12 +120,14 @@ module "websocket" {
   log_retention_days = var.log_retention_days
   event_bus_arn      = module.eventbridge.event_bus_arn
   connections_table  = aws_dynamodb_table.websocket_connections.name
+  audio_bucket_arn   = aws_s3_bucket.audio_storage.arn
   
   # Lambda functions for WebSocket handling
   lambda_functions = {
     connect    = data.archive_file.connect_function.output_path
     disconnect = data.archive_file.disconnect_function.output_path
     message    = data.archive_file.message_function.output_path
+    audio      = data.archive_file.process_audio_function.output_path
   }
 
   # Additional IAM permissions
@@ -134,9 +136,51 @@ module "websocket" {
     EVENT_SOURCE     = var.eventbridge_event_source
     EVENT_DETAIL_TYPE = var.eventbridge_event_detail_type
     EVENT_BUS_NAME   = module.eventbridge.event_bus_name
+    AUDIO_BUCKET     = aws_s3_bucket.audio_storage.id
   }
 
-  depends_on = [aws_dynamodb_table.websocket_connections]
+  depends_on = [aws_dynamodb_table.websocket_connections, aws_s3_bucket.audio_storage]
+}
+
+# Create S3 bucket for audio storage
+resource "aws_s3_bucket" "audio_storage" {
+  bucket = "${var.project_name}-audio-storage-${data.aws_caller_identity.current.account_id}"
+
+  tags = {
+    Name        = "${var.project_name}-audio-storage"
+    Environment = var.environment
+  }
+}
+
+# Audio Processing Module
+module "audio_processing" {
+  source = "./modules/audio_processing"
+  
+  environment        = var.environment
+  project_name       = var.project_name
+  prefix             = "${var.project_name}-audio"
+  audio_bucket_name  = aws_s3_bucket.audio_storage.id
+  event_bus_name     = module.eventbridge.event_bus_name
+  event_bus_arn      = module.eventbridge.event_bus_arn
+  event_source       = var.eventbridge_event_source
+  
+  lambda_functions = {
+    process_audio  = "${path.module}/lambda/process_audio.zip"
+    validate_audio = "${path.module}/lambda/validate_audio.zip"
+  }
+}
+
+# Create Lambda deployment packages for audio processing
+data "archive_file" "process_audio_function" {
+  type        = "zip"
+  source_dir  = "${path.module}/functions/process_audio"
+  output_path = "${path.module}/lambda/process_audio.zip"
+}
+
+data "archive_file" "validate_audio_function" {
+  type        = "zip"
+  source_dir  = "${path.module}/functions/validate_audio"
+  output_path = "${path.module}/lambda/validate_audio.zip"
 }
 
 # SSM Parameters for Configuration

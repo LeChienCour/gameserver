@@ -3,14 +3,9 @@ output "websocket_api_id" {
   value       = aws_apigatewayv2_api.websocket_api.id
 }
 
-output "websocket_api_endpoint" {
-  description = "WebSocket API endpoint"
-  value       = aws_apigatewayv2_api.websocket_api.api_endpoint
-}
-
 output "websocket_stage_url" {
-  description = "WebSocket stage URL"
-  value       = "${aws_apigatewayv2_api.websocket_api.api_endpoint}/${aws_apigatewayv2_stage.websocket_stage.name}"
+  description = "URL of the WebSocket API stage"
+  value       = aws_apigatewayv2_stage.websocket_stage.invoke_url
 }
 
 output "connections_table_name" {
@@ -36,4 +31,9 @@ output "api_key" {
   description = "API key for WebSocket API authentication"
   value       = aws_api_gateway_api_key.websocket_key.value
   sensitive   = true
+}
+
+output "websocket_endpoint" {
+  description = "WebSocket endpoint URL"
+  value       = "${aws_apigatewayv2_stage.websocket_stage.invoke_url}/${var.stage_name}"
 } 

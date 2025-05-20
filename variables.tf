@@ -110,7 +110,7 @@ variable "websocket_prefix" {
 variable "websocket_stage_name" {
   description = "Name of the WebSocket API stage"
   type        = string
-  default     = "prod"
+  default     = "test"
 }
 
 variable "log_retention_days" {
@@ -135,31 +135,31 @@ variable "lambda_functions" {
 
 # EventBridge variables
 variable "eventbridge_prefix" {
-  description = "Prefix to be used for EventBridge resource names"
+  description = "Prefix for EventBridge resources"
   type        = string
   default     = "game-server"
 }
 
 variable "eventbridge_bus_name" {
-  description = "Name of the custom EventBridge event bus"
+  description = "Name of the EventBridge event bus"
   type        = string
-  default     = "game-server-event-bus"
+  default     = "game-server-events"
 }
 
 variable "eventbridge_event_source" {
-  description = "Source identifier for EventBridge events"
+  description = "Source name for EventBridge events"
   type        = string
-  default     = "game-server"
+  default     = "game-server.audio"
 }
 
 variable "eventbridge_event_detail_type" {
   description = "Detail type for EventBridge events"
   type        = string
-  default     = "GameEvent"
+  default     = "SendAudioEvent"
 }
 
 variable "eventbridge_log_retention_days" {
-  description = "Number of days to retain CloudWatch logs for EventBridge events"
+  description = "Number of days to retain EventBridge logs"
   type        = number
   default     = 30
 }

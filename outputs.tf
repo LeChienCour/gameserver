@@ -10,22 +10,17 @@ output "vpc_id" {
 }
 
 output "public_subnets" {
-  description = "IDs of the public subnets"
+  description = "List of public subnet IDs"
   value       = module.vpc.public_subnets_ids
 }
 
 # Security Group Outputs
-output "game_server_security_group_id" {
+output "game_server_sg_id" {
   description = "ID of the game server security group"
   value       = module.security_groups.game_server_sg_id
 }
 
 # EC2 Instance Outputs
-output "game_server_instance_id" {
-  description = "ID of the EC2 game server instance"
-  value       = module.ec2_game_server.instance_id
-}
-
 output "game_server_public_ip" {
   description = "Public IP of the EC2 game server"
   value       = module.ec2_game_server.game_server_public_ip
@@ -37,12 +32,12 @@ output "game_server_public_dns" {
 }
 
 # Cognito Outputs
-output "cognito_user_pool_id" {
+output "user_pool_id" {
   description = "ID of the Cognito User Pool"
   value       = module.cognito.user_pool_id
 }
 
-output "cognito_user_pool_client_id" {
+output "user_pool_client_id" {
   description = "ID of the Cognito User Pool Client"
   value       = module.cognito.user_pool_client_id
 }
@@ -52,40 +47,19 @@ output "cognito_admin_role_arn" {
   value       = module.cognito.cognito_admin_role_arn
 }
 
-# EventBridge outputs
-output "eventbridge_bus_arn" {
-  description = "ARN of the custom EventBridge event bus"
-  value       = module.eventbridge.event_bus_arn
-}
-
-output "eventbridge_bus_name" {
-  description = "Name of the custom EventBridge event bus"
-  value       = module.eventbridge.event_bus_name
-}
-
-output "eventbridge_log_group_name" {
-  description = "Name of the CloudWatch log group for EventBridge events"
-  value       = module.eventbridge.log_group_name
-}
-
-output "eventbridge_rule_name" {
-  description = "Name of the EventBridge rule for game events"
-  value       = module.eventbridge.event_rule_name
-}
-
-# WebSocket outputs
+# WebSocket Outputs
 output "websocket_api_id" {
   description = "ID of the WebSocket API"
   value       = module.websocket.websocket_api_id
 }
 
-output "websocket_api_endpoint" {
-  description = "WebSocket API endpoint"
-  value       = module.websocket.websocket_api_endpoint
+output "websocket_endpoint" {
+  description = "WebSocket endpoint URL"
+  value       = module.websocket.websocket_endpoint
 }
 
 output "websocket_stage_url" {
-  description = "WebSocket stage URL"
+  description = "URL of the WebSocket API stage"
   value       = module.websocket.websocket_stage_url
 }
 
@@ -95,9 +69,21 @@ output "websocket_api_key" {
   sensitive   = true
 }
 
-output "websocket_lambda_functions" {
-  description = "ARNs of the WebSocket Lambda functions"
-  value       = module.websocket.lambda_functions
+# DynamoDB Outputs
+output "connections_table_name" {
+  description = "Name of the DynamoDB table for WebSocket connections"
+  value       = aws_dynamodb_table.websocket_connections.name
+}
+
+# EventBridge Outputs
+output "event_bus_name" {
+  description = "Name of the EventBridge event bus"
+  value       = module.eventbridge.event_bus_name
+}
+
+output "event_bus_arn" {
+  description = "ARN of the EventBridge event bus"
+  value       = module.eventbridge.event_bus_arn
 }
 
 # SSM Parameter Outputs

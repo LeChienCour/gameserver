@@ -1,168 +1,169 @@
-# Game Server with Voice Chat Infrastructure
+# Game Server Infrastructure
 
-This repository contains Terraform configurations for deploying a game server with real-time voice chat capabilities using AWS services.
+This repository contains the Terraform infrastructure code for a game server with real-time voice chat capabilities.
 
 ## Architecture Overview
 
-The infrastructure consists of the following components:
+The infrastructure consists of several key components:
 
-### Core Components
-- **EC2 Game Server**: Central hub for game and voice chat functionality
-  - Handles WebSocket connections for real-time communication
-  - Manages voice chat channels and audio routing
-  - Runs the game server application
+1. **WebSocket API Gateway**
+   - Handles real-time communication
+   - Supports audio streaming
+   - API key authentication
+   - Routes: connect, disconnect, sendaudio, audio
 
-### Authentication & Security
-- **Amazon Cognito**: User authentication and management
-  - User pools for player accounts
-  - Secure token-based authentication
-  - Integration with the game server
+2. **Lambda Functions**
+   - Connection management (connect/disconnect)
+   - Message handling
+   - Audio processing
+   - Audio validation
 
-### Real-time Communication
-- **WebSocket API Gateway**: Manages real-time connections
-  - Handles WebSocket connections (`$connect`)
-  - Processes messages (`$default`)
-  - Manages disconnections (`$disconnect`)
-  - Routes traffic to the EC2 instance
+3. **Storage**
+   - DynamoDB for WebSocket connections
+   - S3 bucket for audio storage
+   - KMS for audio encryption
 
-### Network & Security
-- **VPC**: Isolated network environment
-  - Public subnets for internet-facing resources
-  - Security groups for access control
-  - Network ACLs for additional security
+4. **Event Processing**
+   - EventBridge for event routing
+   - CloudWatch for logging and monitoring
 
-### Configuration Management
-- **Systems Manager Parameter Store**: Secure configuration storage
-  - Cognito configuration
-  - WebSocket endpoints
-  - Environment variables
+5. **Security**
+   - Cognito for user authentication
+   - API keys for WebSocket access
+   - IAM roles and policies
 
-## Prerequisites
+## Audio Flow
 
-- AWS CLI configured with appropriate credentials
-- Terraform v1.0.0 or later
-- Node.js and npm (for local development)
+The voice chat system follows this flow:
+
+1. **Client Connection**
+   - Client connects to WebSocket API with API key
+   - Connection ID stored in DynamoDB
+
+2. **Audio Transmission**
+   - Client captures audio and sends via WebSocket
+   - Audio data is base64 encoded
+   - Uses 'sendaudio' or 'audio' route
+
+3. **Processing Pipeline**
+   ```
+   Client -> WebSocket API -> Lambda -> S3 -> EventBridge -> Processing Lambda -> Broadcast
+   ```
+
+   a. **Initial Reception**
+      - WebSocket API receives audio data
+      - Routes to audio Lambda function
+      - Audio stored in S3 bucket
+      - Event published to EventBridge
+
+   b. **Processing**
+      - Audio validation Lambda checks format/size
+      - Processing Lambda handles audio data
+      - KMS encryption for stored audio
+
+   c. **Broadcasting**
+      - Processed audio broadcast to all connected clients
+      - Uses DynamoDB to track active connections
+      - Handles disconnected clients cleanup
+
+4. **Event Flow**
+   - SendAudioEvent triggers processing
+   - Status transitions: PENDING -> PROCESSING -> COMPLETED
+   - Failed events handled with error status
 
 ## Infrastructure Components
 
-### VPC Module
-- Custom VPC with public subnets
-- Internet Gateway for public access
-- Route tables for network routing
-
-### Security Groups
-- Game server port (default: 25565)
-- WebSocket port (default: 8080)
-- SSH access (port 22)
-- Outbound internet access
-
-### EC2 Instance
-- Amazon Linux 2 or Ubuntu AMI
-- Python runtime
-- IAM role with necessary permissions
-- User data script for application setup
-
-### Cognito
-- User pool for player accounts
-- App client for application integration
-- Admin role for management
-
-### WebSocket API
-- Custom domain (optional)
-- Stage for deployment
-- Integration with EC2 instance
+### WebSocket Module
+- API Gateway v2 (WebSocket)
+- API key authentication
+- Stage configuration
 - CloudWatch logging
+
+### Audio Processing Module
+- Lambda functions for processing
+- S3 bucket for storage
+- KMS encryption
+- EventBridge rules and targets
+
+### Event Processing
+- Custom EventBridge bus
+- Event rules for audio processing
+- CloudWatch logging
+- Error handling
+
+## Environment Variables
+
+Key environment variables used in the Lambda functions:
+- CONNECTIONS_TABLE: DynamoDB table name
+- AUDIO_BUCKET: S3 bucket name
+- EVENT_BUS_NAME: EventBridge bus name
+- EVENT_SOURCE: Event source identifier
+- EVENT_DETAIL_TYPE: Event detail type
+
+## Security
+
+1. **Authentication**
+   - Cognito user pools
+   - API key required for WebSocket
+   - IAM roles per service
+
+2. **Encryption**
+   - KMS for audio data
+   - HTTPS for all API communication
+   - Secure parameter storage in SSM
+
+## Monitoring
+
+- CloudWatch logs for all components
+- EventBridge for event tracking
+- API Gateway metrics
+- Lambda function metrics
 
 ## Deployment
 
-1. **Initialize Terraform**:
+1. Prerequisites:
+   - AWS CLI configured
+   - Terraform installed
+   - Required permissions
+
+2. Deployment Steps:
    ```bash
    terraform init
-   ```
-
-2. **Configure Variables**:
-   - Copy `terraform.tfvars.example` to `terraform.tfvars`
-   - Update the variables with your values
-
-3. **Plan Deployment**:
-   ```bash
    terraform plan
-   ```
-
-4. **Apply Configuration**:
-   ```bash
    terraform apply
    ```
 
-## Configuration
+3. Post-deployment:
+   - Get WebSocket URL from outputs
+   - Configure client with API key
+   - Test connections
 
-### Required Variables
-- `ami_id`: AMI ID for the EC2 instance
-- `instance_type`: EC2 instance type
-- `vpc_cidr`: CIDR block for VPC
-- `public_subnets_cidr`: CIDR blocks for public subnets
-- `availability_zones`: AWS availability zones
+## Outputs
 
-### Optional Variables
-- `game_port`: Game server port (default: 25565)
-- `websocket_port`: WebSocket server port (default: 8080)
-- `ssh_cidr`: SSH access CIDR (default: 0.0.0.0/0)
-- `environment`: Environment name (default: dev)
-- `project_name`: Project name (default: game-server)
-
-## Security Considerations
-
-1. **Network Security**
-   - Security groups restrict access to necessary ports
-   - VPC provides network isolation
-   - SSH access should be restricted to specific IPs
-
-2. **Authentication**
-   - Cognito provides secure user authentication
-   - IAM roles follow principle of least privilege
-   - WebSocket connections require valid tokens
-
-3. **Data Protection**
-   - All sensitive data stored in SSM Parameter Store
-   - WebSocket connections use WSS (secure WebSocket)
-   - Cognito tokens for secure communication
-
-## Monitoring and Logging
-
-- CloudWatch Logs for WebSocket API
-- CloudWatch Metrics for EC2 instance
-- CloudWatch Alarms for critical metrics
-- Log retention period: 30 days (configurable)
-
-## Maintenance
-
-### Updating the Infrastructure
-1. Modify the Terraform configuration
-2. Run `terraform plan` to review changes
-3. Apply changes with `terraform apply`
-
-### Scaling
-- EC2 instance type can be modified
-- WebSocket API can be configured for auto-scaling
-- Security groups can be updated for new requirements
+Important infrastructure outputs:
+- WebSocket endpoint URL
+- API key (sensitive)
+- S3 bucket name
+- EventBridge bus name
+- CloudWatch log groups
 
 ## Troubleshooting
 
-### Common Issues
-1. **WebSocket Connection Failures**
-   - Check security group rules
-   - Verify WebSocket API configuration
-   - Check EC2 instance status
+Common issues and solutions:
+1. Connection Issues
+   - Check API key in headers
+   - Verify WebSocket URL
+   - Check CloudWatch logs
 
-2. **Authentication Issues**
-   - Verify Cognito configuration
-   - Check IAM role permissions
-   - Validate token handling
+2. Audio Issues
+   - Verify audio format
+   - Check S3 bucket permissions
+   - Monitor EventBridge events
 
-3. **Performance Issues**
-   - Monitor EC2 instance metrics
-   - Check WebSocket API metrics
-   - Review CloudWatch logs
+3. Processing Issues
+   - Check Lambda logs
+   - Verify EventBridge rules
+   - Check IAM permissions
 
 ## Contributing
 

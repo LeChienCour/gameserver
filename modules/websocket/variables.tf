@@ -7,13 +7,13 @@ variable "prefix" {
 variable "stage_name" {
   description = "Name of the WebSocket API stage"
   type        = string
-  default     = "prod"
+  default     = "test"
 }
 
 variable "environment" {
   description = "Environment name (e.g., dev, prod)"
   type        = string
-  default     = "prod"
+  default     = "test"
 }
 
 variable "project_name" {
@@ -44,11 +44,13 @@ variable "lambda_functions" {
     connect    = string
     disconnect = string
     message    = string
+    audio      = string
   })
   default = {
     connect    = "lambda/connect.zip"
     disconnect = "lambda/disconnect.zip"
     message    = "lambda/message.zip"
+    audio      = "lambda/audio.zip"
   }
 }
 
@@ -56,4 +58,9 @@ variable "lambda_environment_variables" {
   description = "Environment variables for Lambda functions"
   type        = map(string)
   default     = {}
+}
+
+variable "audio_bucket_arn" {
+  description = "ARN of the S3 bucket for audio storage"
+  type        = string
 } 
