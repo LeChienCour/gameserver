@@ -39,37 +39,91 @@ The voice chat system follows this flow:
 1. **Client Connection**
    - Client connects to WebSocket API with API key
    - Connection ID stored in DynamoDB
+   - Uses `$connect` route handled by `connect` Lambda
 
 2. **Audio Transmission**
    - Client captures audio and sends via WebSocket
    - Audio data is base64 encoded
    - Uses 'sendaudio' or 'audio' route
+   - Message format:
+     ```json
+     {
+       "action": "audio",
+       "data": "base64_encoded_audio",
+       "author": "username"
+     }
+     ```
 
 3. **Processing Pipeline**
    ```
-   Client -> WebSocket API -> Lambda -> S3 -> EventBridge -> Processing Lambda -> Broadcast
+   Client -> WebSocket API -> Process Audio Lambda -> S3 + EventBridge -> Audio Processing Lambda -> Validation Lambda -> Broadcast
    ```
 
-   a. **Initial Reception**
-      - WebSocket API receives audio data
-      - Routes to audio Lambda function
-      - Audio stored in S3 bucket
-      - Event published to EventBridge
+   a. **Initial Reception (Process Audio Lambda)**
+      - Receives WebSocket message
+      - Validates basic message structure
+      - Stores raw audio in S3 with path: `audio/{author}/{timestamp}.pcm`
+      - Publishes PENDING event to EventBridge:
+        ```json
+        {
+          "Source": "game-server.audio",
+          "DetailType": "SendAudioEvent",
+          "Detail": {
+            "status": "PENDING",
+            "author": "username",
+            "s3_key": "audio/path/file.pcm",
+            "timestamp": "ISO8601_timestamp"
+          }
+        }
+        ```
+      - Broadcasts audio to other connected clients
 
-   b. **Processing**
-      - Audio validation Lambda checks format/size
-      - Processing Lambda handles audio data
-      - KMS encryption for stored audio
+   b. **Audio Processing (Audio Processing Lambda)**
+      - Triggered by EventBridge rule on PENDING status
+      - Retrieves audio from S3
+      - Applies KMS encryption
+      - Updates status to PROCESSING
+      - Triggers validation process
 
-   c. **Broadcasting**
-      - Processed audio broadcast to all connected clients
-      - Uses DynamoDB to track active connections
+   c. **Audio Validation (Validation Lambda)**
+      - Triggered by EventBridge rule on PROCESSING status
+      - Validates audio format and size:
+        - Minimum size: 1KB
+        - Maximum size: 5MB
+        - Proper base64 encoding
+      - Updates status to COMPLETED or FAILED
+
+   d. **Broadcasting**
+      - Process Audio Lambda handles broadcasting
+      - Uses DynamoDB to get active connections
+      - Sends audio to all clients except sender
+      - Message format:
+        ```json
+        {
+          "action": "audio",
+          "data": {
+            "audio": "base64_encoded_audio",
+            "author": "username",
+            "timestamp": "ISO8601_timestamp"
+          }
+        }
+        ```
       - Handles disconnected clients cleanup
 
-4. **Event Flow**
-   - SendAudioEvent triggers processing
-   - Status transitions: PENDING -> PROCESSING -> COMPLETED
-   - Failed events handled with error status
+4. **Event Flow States**
+   ```
+   [PENDING] -> [PROCESSING] -> [COMPLETED/FAILED]
+   ```
+   - PENDING: Initial state when audio is received
+   - PROCESSING: Audio is being processed and validated
+   - COMPLETED: Audio successfully processed
+   - FAILED: Processing or validation failed
+
+5. **Error Handling**
+   - Connection errors: Remove stale connections from DynamoDB
+   - S3 errors: Return 500 error, log failure
+   - Processing errors: Mark event as FAILED
+   - Validation errors: Return 400 error with details
 
 ## Infrastructure Components
 
