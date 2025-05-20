@@ -30,4 +30,10 @@ output "lambda_functions" {
 output "log_group_name" {
   description = "Name of the CloudWatch log group"
   value       = aws_cloudwatch_log_group.websocket_logs.name
+}
+
+output "api_key" {
+  description = "API key for WebSocket API authentication"
+  value       = aws_api_gateway_api_key.websocket_key.value
+  sensitive   = true
 } 

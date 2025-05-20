@@ -5,6 +5,91 @@ resource "aws_apigatewayv2_api" "websocket_api" {
   route_selection_expression = "$request.body.action"
 }
 
+# API Key
+resource "aws_api_gateway_api_key" "websocket_key" {
+  name = "${var.prefix}-websocket-key"
+}
+
+# Usage Plan
+resource "aws_api_gateway_usage_plan" "websocket" {
+  name = "${var.prefix}-websocket-usage-plan"
+
+  api_stages {
+    api_id = aws_apigatewayv2_api.websocket_api.id
+    stage  = aws_apigatewayv2_stage.websocket_stage.name
+  }
+
+  quota_settings {
+    limit  = 1000000
+    period = "MONTH"
+  }
+
+  throttle_settings {
+    burst_limit = 100
+    rate_limit  = 50
+  }
+}
+
+resource "aws_api_gateway_usage_plan_key" "websocket" {
+  key_id        = aws_api_gateway_api_key.websocket_key.id
+  key_type      = "API_KEY"
+  usage_plan_id = aws_api_gateway_usage_plan.websocket.id
+}
+
+# IAM Role for API Gateway Logging
+resource "aws_iam_role" "apigateway_cloudwatch" {
+  name = "${var.prefix}-apigateway-cloudwatch"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = "sts:AssumeRole"
+        Effect = "Allow"
+        Principal = {
+          Service = "apigateway.amazonaws.com"
+        }
+      }
+    ]
+  })
+}
+
+# IAM Policy for API Gateway Logging
+resource "aws_iam_role_policy" "apigateway_cloudwatch" {
+  name = "${var.prefix}-apigateway-cloudwatch"
+  role = aws_iam_role.apigateway_cloudwatch.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "logs:CreateLogGroup",
+          "logs:CreateLogStream",
+          "logs:DescribeLogGroups",
+          "logs:DescribeLogStreams",
+          "logs:PutLogEvents",
+          "logs:GetLogEvents",
+          "logs:FilterLogEvents"
+        ]
+        Resource = "arn:aws:logs:*:*:*"
+      }
+    ]
+  })
+}
+
+# API Gateway Account Settings
+resource "aws_api_gateway_account" "this" {
+  cloudwatch_role_arn = aws_iam_role.apigateway_cloudwatch.arn
+}
+
+# CloudWatch Log Group for WebSocket API
+resource "aws_cloudwatch_log_group" "websocket_logs" {
+  name              = "/aws/websocket/${var.prefix}"
+  retention_in_days = var.log_retention_days
+}
+
 # WebSocket Stage
 resource "aws_apigatewayv2_stage" "websocket_stage" {
   api_id = aws_apigatewayv2_api.websocket_api.id
@@ -27,12 +112,11 @@ resource "aws_apigatewayv2_stage" "websocket_stage" {
       integrationError = "$context.integrationErrorMessage"
     })
   }
-}
 
-# CloudWatch Log Group for WebSocket API
-resource "aws_cloudwatch_log_group" "websocket_logs" {
-  name              = "/aws/websocket/${var.prefix}"
-  retention_in_days = var.log_retention_days
+  depends_on = [
+    aws_api_gateway_account.this,
+    aws_cloudwatch_log_group.websocket_logs
+  ]
 }
 
 # Lambda Functions
