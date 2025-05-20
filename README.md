@@ -58,7 +58,7 @@ The infrastructure consists of the following components:
 
 ### EC2 Instance
 - Amazon Linux 2 or Ubuntu AMI
-- Node.js runtime
+- Python runtime
 - IAM role with necessary permissions
 - User data script for application setup
 

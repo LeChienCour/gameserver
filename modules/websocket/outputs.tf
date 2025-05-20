@@ -15,12 +15,7 @@ output "websocket_stage_url" {
 
 output "connections_table_name" {
   description = "Name of the DynamoDB table for WebSocket connections"
-  value       = aws_dynamodb_table.connections.name
-}
-
-output "connections_table_arn" {
-  description = "ARN of the DynamoDB table for WebSocket connections"
-  value       = aws_dynamodb_table.connections.arn
+  value       = var.connections_table
 }
 
 output "lambda_functions" {

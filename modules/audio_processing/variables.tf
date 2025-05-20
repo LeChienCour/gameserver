@@ -19,6 +19,10 @@ variable "lambda_functions" {
     process_audio  = string
     validate_audio = string
   })
+  default = {
+    process_audio  = "lambda/process_audio.zip"
+    validate_audio = "lambda/validate_audio.zip"
+  }
 }
 
 variable "audio_bucket_name" {

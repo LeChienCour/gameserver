@@ -1,7 +1,7 @@
 variable "prefix" {
   description = "Prefix to be used for resource names"
   type        = string
-  default     = "voice-chat"
+  default     = "game-server"
 }
 
 variable "stage_name" {
@@ -19,7 +19,7 @@ variable "environment" {
 variable "project_name" {
   description = "Name of the project"
   type        = string
-  default     = "voice-chat"
+  default     = "game-server"
 }
 
 variable "log_retention_days" {
@@ -33,6 +33,11 @@ variable "event_bus_arn" {
   type        = string
 }
 
+variable "connections_table" {
+  description = "Name of the DynamoDB table for WebSocket connections"
+  type        = string
+}
+
 variable "lambda_functions" {
   description = "Map of Lambda function file paths"
   type = object({
@@ -40,4 +45,15 @@ variable "lambda_functions" {
     disconnect = string
     message    = string
   })
+  default = {
+    connect    = "lambda/connect.zip"
+    disconnect = "lambda/disconnect.zip"
+    message    = "lambda/message.zip"
+  }
+}
+
+variable "lambda_environment_variables" {
+  description = "Environment variables for Lambda functions"
+  type        = map(string)
+  default     = {}
 } 

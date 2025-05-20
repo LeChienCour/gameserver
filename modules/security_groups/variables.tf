@@ -21,14 +21,10 @@ variable "ssh_cidr" {
   default     = "0.0.0.0/0"
 }
 
-variable "audio_port" {
-  description = "Port for audio chat"
-  type        = number
-}
-
 variable "game_protocol" {
   description = "Protocol for the game server (tcp or udp)"
   type        = string
+  default     = "tcp"
 }
 
 variable "security_group_name" {
@@ -41,9 +37,4 @@ variable "allowed_game_ips" {
   description = "List of allowed IPs for game server access"
   type        = list(string)
   default     = ["0.0.0.0/0"]
-}
-
-variable "allowed_audio_ips" {
-  description = "List of IPs allowed for audio"
-  type        = list(string)
 }

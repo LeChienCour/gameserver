@@ -15,8 +15,8 @@ resource "aws_lambda_function" "process_audio" {
   filename         = var.lambda_functions.process_audio
   function_name    = "${var.prefix}-process-audio"
   role            = aws_iam_role.lambda_role.arn
-  handler         = "index.handler"
-  runtime         = "nodejs18.x"
+  handler         = "main.lambda_handler"
+  runtime         = "python3.10"
   timeout         = 300
   memory_size     = 1024
 
@@ -34,8 +34,8 @@ resource "aws_lambda_function" "validate_audio" {
   filename         = var.lambda_functions.validate_audio
   function_name    = "${var.prefix}-validate-audio"
   role            = aws_iam_role.lambda_role.arn
-  handler         = "index.handler"
-  runtime         = "nodejs18.x"
+  handler         = "main.lambda_handler"
+  runtime         = "python3.10"
   timeout         = 30
   memory_size     = 256
 

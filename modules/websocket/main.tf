@@ -29,27 +29,6 @@ resource "aws_apigatewayv2_stage" "websocket_stage" {
   }
 }
 
-# DynamoDB Table for WebSocket Connections
-resource "aws_dynamodb_table" "connections" {
-  name           = "${var.prefix}-connections"
-  billing_mode   = "PAY_PER_REQUEST"
-  hash_key       = "connectionId"
-  attribute {
-    name = "connectionId"
-    type = "S"
-  }
-
-  ttl {
-    attribute_name = "ttl"
-    enabled        = true
-  }
-
-  tags = {
-    Environment = var.environment
-    Project     = var.project_name
-  }
-}
-
 # CloudWatch Log Group for WebSocket API
 resource "aws_cloudwatch_log_group" "websocket_logs" {
   name              = "/aws/websocket/${var.prefix}"
@@ -61,14 +40,17 @@ resource "aws_lambda_function" "connect" {
   filename         = var.lambda_functions.connect
   function_name    = "${var.prefix}-connect"
   role            = aws_iam_role.lambda_role.arn
-  handler         = "index.handler"
-  runtime         = "nodejs18.x"
+  handler         = "lambda_function.lambda_handler"
+  runtime         = "python3.10"
   timeout         = 30
 
   environment {
-    variables = {
-      CONNECTIONS_TABLE = aws_dynamodb_table.connections.name
-    }
+    variables = merge(
+      {
+        CONNECTIONS_TABLE = var.connections_table
+      },
+      var.lambda_environment_variables
+    )
   }
 }
 
@@ -76,14 +58,17 @@ resource "aws_lambda_function" "disconnect" {
   filename         = var.lambda_functions.disconnect
   function_name    = "${var.prefix}-disconnect"
   role            = aws_iam_role.lambda_role.arn
-  handler         = "index.handler"
-  runtime         = "nodejs18.x"
+  handler         = "lambda_function.lambda_handler"
+  runtime         = "python3.10"
   timeout         = 30
 
   environment {
-    variables = {
-      CONNECTIONS_TABLE = aws_dynamodb_table.connections.name
-    }
+    variables = merge(
+      {
+        CONNECTIONS_TABLE = var.connections_table
+      },
+      var.lambda_environment_variables
+    )
   }
 }
 
@@ -91,15 +76,17 @@ resource "aws_lambda_function" "message" {
   filename         = var.lambda_functions.message
   function_name    = "${var.prefix}-message"
   role            = aws_iam_role.lambda_role.arn
-  handler         = "index.handler"
-  runtime         = "nodejs18.x"
+  handler         = "lambda_function.lambda_handler"
+  runtime         = "python3.10"
   timeout         = 30
 
   environment {
-    variables = {
-      CONNECTIONS_TABLE = aws_dynamodb_table.connections.name
-      EVENT_BUS_ARN    = var.event_bus_arn
-    }
+    variables = merge(
+      {
+        CONNECTIONS_TABLE = var.connections_table
+      },
+      var.lambda_environment_variables
+    )
   }
 }
 
@@ -139,7 +126,7 @@ resource "aws_iam_role_policy" "lambda_policy" {
           "dynamodb:Query",
           "dynamodb:UpdateItem"
         ]
-        Resource = aws_dynamodb_table.connections.arn
+        Resource = "arn:aws:dynamodb:*:*:table/${var.connections_table}"
       },
       {
         Effect = "Allow"
@@ -156,6 +143,13 @@ resource "aws_iam_role_policy" "lambda_policy" {
           "logs:PutLogEvents"
         ]
         Resource = "arn:aws:logs:*:*:*"
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "execute-api:ManageConnections"
+        ]
+        Resource = "${aws_apigatewayv2_api.websocket_api.execution_arn}/*"
       }
     ]
   })
@@ -174,9 +168,17 @@ resource "aws_apigatewayv2_route" "disconnect" {
   target    = "integrations/${aws_apigatewayv2_integration.disconnect.id}"
 }
 
-resource "aws_apigatewayv2_route" "message" {
+# Route for handling sendaudio action
+resource "aws_apigatewayv2_route" "sendaudio" {
   api_id    = aws_apigatewayv2_api.websocket_api.id
-  route_key = "message"
+  route_key = "sendaudio"
+  target    = "integrations/${aws_apigatewayv2_integration.message.id}"
+}
+
+# Default route for any other action (optional)
+resource "aws_apigatewayv2_route" "default" {
+  api_id    = aws_apigatewayv2_api.websocket_api.id
+  route_key = "$default"
   target    = "integrations/${aws_apigatewayv2_integration.message.id}"
 }
 

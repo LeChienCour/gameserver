@@ -48,14 +48,10 @@ variable "ssh_cidr" {
   default     = "0.0.0.0/0"
 }
 
-variable "audio_port" {
-  description = "Port for audio chat"
-  type        = number
-}
-
 variable "game_protocol" {
   description = "Protocol for the game server (tcp or udp)"
   type        = string
+  default     = "tcp"
 }
 
 variable "ami_id" {
@@ -130,31 +126,36 @@ variable "lambda_functions" {
     disconnect = string
     message    = string
   })
+  default = {
+    connect    = "lambda/connect.zip"
+    disconnect = "lambda/disconnect.zip"
+    message    = "lambda/message.zip"
+  }
 }
 
 # EventBridge variables
 variable "eventbridge_prefix" {
   description = "Prefix to be used for EventBridge resource names"
   type        = string
-  default     = "voice-chat"
+  default     = "game-server"
 }
 
 variable "eventbridge_bus_name" {
   description = "Name of the custom EventBridge event bus"
   type        = string
-  default     = "voice-chat-event-bus"
+  default     = "game-server-event-bus"
 }
 
 variable "eventbridge_event_source" {
   description = "Source identifier for EventBridge events"
   type        = string
-  default     = "appsync.voicechat"
+  default     = "game-server"
 }
 
 variable "eventbridge_event_detail_type" {
   description = "Detail type for EventBridge events"
   type        = string
-  default     = "SendAudioEvent"
+  default     = "GameEvent"
 }
 
 variable "eventbridge_log_retention_days" {

@@ -1,31 +1,21 @@
 output "event_bus_arn" {
   description = "ARN of the custom event bus"
-  value       = aws_cloudwatch_event_bus.voice_chat_bus.arn
+  value       = aws_cloudwatch_event_bus.game_event_bus.arn
 }
 
 output "event_bus_name" {
   description = "Name of the custom event bus"
-  value       = aws_cloudwatch_event_bus.voice_chat_bus.name
-}
-
-output "eventbridge_role_arn" {
-  description = "ARN of the IAM role for EventBridge integration"
-  value       = aws_iam_role.appsync_eventbridge_role.arn
-}
-
-output "eventbridge_datasource_name" {
-  description = "Name of the EventBridge data source in AppSync"
-  value       = aws_appsync_datasource.eventbridge_datasource.name
+  value       = aws_cloudwatch_event_bus.game_event_bus.name
 }
 
 output "log_group_name" {
   description = "Name of the CloudWatch log group"
-  value       = aws_cloudwatch_log_group.voice_chat_logs.name
+  value       = aws_cloudwatch_log_group.game_event_logs.name
 }
 
 output "event_rule_name" {
   description = "Name of the EventBridge rule"
-  value       = aws_cloudwatch_event_rule.voice_chat_event_rule.name
+  value       = aws_cloudwatch_event_rule.game_event_rule.name
 }
 
 output "event_source" {

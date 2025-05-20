@@ -6,7 +6,6 @@ vpc_name            = "game-server-vpc"
 security_group_name = "game-server-sg"
 game_port           = 27015
 ssh_cidr            = "0.0.0.0/0"
-audio_port          = 10000
 game_protocol       = "udp"
 
 ami_id        = "ami-0e3faa5e960844571"
@@ -22,3 +21,12 @@ eventbridge_bus_name          = "voice-chat-event-bus"
 eventbridge_event_source      = "appsync.voicechat"
 eventbridge_event_detail_type = "SendAudioEvent"
 eventbridge_log_retention_days = 30
+
+# Lambda functions configuration
+lambda_functions = {
+  connect    = "lambda/connect.zip"
+  disconnect = "lambda/disconnect.zip"
+  message    = "lambda/message.zip"
+  process_audio  = "lambda/process_audio.zip"
+  validate_audio = "lambda/validate_audio.zip"
+}

@@ -6,7 +6,6 @@ terraform {
     key            = "terraform/state"
     region         = "us-east-1"
     encrypt        = true
-    use_lockfile   = true
     dynamodb_table = "terraform-state-locks"
   }
   required_providers {
@@ -39,6 +38,7 @@ module "security_groups" {
   ssh_cidr            = var.ssh_cidr
   security_group_name = var.security_group_name
   allowed_game_ips    = ["0.0.0.0/0"]
+  game_protocol       = var.game_protocol
 }
 
 # EC2 Game Server with WebSocket Support
@@ -62,6 +62,53 @@ module "cognito" {
   admin_role_name = var.admin_role_name
 }
 
+# EventBridge for event handling
+module "eventbridge" {
+  source = "./modules/eventbridge"
+  
+  prefix         = var.eventbridge_prefix
+  event_bus_name = var.eventbridge_bus_name
+  event_source   = var.eventbridge_event_source
+  event_detail_type = var.eventbridge_event_detail_type
+  log_retention_days = var.eventbridge_log_retention_days
+}
+
+# DynamoDB table for WebSocket connections
+resource "aws_dynamodb_table" "websocket_connections" {
+  name           = "${var.project_name}-connections"
+  billing_mode   = "PAY_PER_REQUEST"
+  hash_key       = "connectionId"
+  
+  attribute {
+    name = "connectionId"
+    type = "S"
+  }
+
+  tags = {
+    Name        = "${var.project_name}-connections"
+    Environment = var.environment
+  }
+}
+
+# Create Lambda deployment packages
+data "archive_file" "connect_function" {
+  type        = "zip"
+  source_dir  = "${path.module}/functions/connect"
+  output_path = "${path.module}/lambda/connect.zip"
+}
+
+data "archive_file" "disconnect_function" {
+  type        = "zip"
+  source_dir  = "${path.module}/functions/disconnect"
+  output_path = "${path.module}/lambda/disconnect.zip"
+}
+
+data "archive_file" "message_function" {
+  type        = "zip"
+  source_dir  = "${path.module}/functions/message"
+  output_path = "${path.module}/lambda/message.zip"
+}
+
 # WebSocket API Gateway
 module "websocket" {
   source = "./modules/websocket"
@@ -71,13 +118,25 @@ module "websocket" {
   environment        = var.environment
   project_name       = var.project_name
   log_retention_days = var.log_retention_days
+  event_bus_arn      = module.eventbridge.event_bus_arn
+  connections_table  = aws_dynamodb_table.websocket_connections.name
   
   # Lambda functions for WebSocket handling
   lambda_functions = {
-    connect    = var.lambda_functions.connect
-    disconnect = var.lambda_functions.disconnect
-    message    = var.lambda_functions.message
+    connect    = data.archive_file.connect_function.output_path
+    disconnect = data.archive_file.disconnect_function.output_path
+    message    = data.archive_file.message_function.output_path
   }
+
+  # Additional IAM permissions
+  lambda_environment_variables = {
+    CONNECTIONS_TABLE = aws_dynamodb_table.websocket_connections.name
+    EVENT_SOURCE     = var.eventbridge_event_source
+    EVENT_DETAIL_TYPE = var.eventbridge_event_detail_type
+    EVENT_BUS_NAME   = module.eventbridge.event_bus_name
+  }
+
+  depends_on = [aws_dynamodb_table.websocket_connections]
 }
 
 # SSM Parameters for Configuration
