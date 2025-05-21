@@ -70,6 +70,7 @@ def broadcast_audio(connections, audio_data, author, connection_id, endpoint_url
                     failed_broadcasts += 1
     
     logger.info(f"Broadcast summary: {successful_broadcasts} successful, {failed_broadcasts} failed, {deleted_connections} stale connections deleted")
+    return message, successful_broadcasts, failed_broadcasts, deleted_connections
 
 def validate_audio_format(audio_data):
     try:
@@ -160,12 +161,29 @@ def lambda_handler(event, context):
         
         # Broadcast the validated audio
         try:
-            broadcast_audio(connections, audio_data, author, connection_id, endpoint_url)
+            sent_payload, successes, failures, deletions = broadcast_audio(
+                connections, 
+                audio_data, 
+                author, 
+                connection_id, 
+                endpoint_url
+            )
+            
+            logger.info(f"Broadcast summary:{sent_payload} payload, {successes} successes, {failures} failures, {deletions} stale connections deleted")
+            
+            response_body = {
+                'message': 'Audio validated and broadcast successfully',
+                'broadcast_content_sent': sent_payload,
+                'broadcast_statistics': {
+                    'initial_target_connections_count': len(connections),
+                    'successful_sends': successes,
+                    'failed_sends': failures,
+                    'stale_connections_deleted': deletions
+                }
+            }
             return {
                 'statusCode': 200,
-                'body': json.dumps({
-                    'message': 'Audio validated and broadcast successfully'
-                })
+                'body': json.dumps(response_body) 
             }
         except Exception as e:
             error_msg = f"Error broadcasting audio: {str(e)}"
