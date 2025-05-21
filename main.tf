@@ -119,6 +119,8 @@ module "websocket" {
   project_name       = var.project_name
   log_retention_days = var.log_retention_days
   event_bus_arn      = module.eventbridge.event_bus_arn
+  event_bus_name     = module.eventbridge.event_bus_name
+  event_source       = var.eventbridge_event_source
   connections_table  = aws_dynamodb_table.websocket_connections.name
   audio_bucket_arn   = aws_s3_bucket.audio_storage.arn
   
@@ -163,6 +165,8 @@ module "audio_processing" {
   event_bus_name     = module.eventbridge.event_bus_name
   event_bus_arn      = module.eventbridge.event_bus_arn
   event_source       = var.eventbridge_event_source
+  connections_table  = aws_dynamodb_table.websocket_connections.name
+  enable_echo_mode   = var.enable_echo_mode  # This will be false by default
   
   lambda_functions = {
     process_audio  = "${path.module}/lambda/process_audio.zip"

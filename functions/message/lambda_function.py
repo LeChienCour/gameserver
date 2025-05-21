@@ -2,6 +2,7 @@ import json
 import boto3
 import os
 import logging
+from datetime import datetime
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
@@ -31,6 +32,12 @@ def get_api_gateway_management_client(event):
 
 def broadcast_message(apigw_client, connections, message, source_connection_id=None, table=None):
     """Broadcast a message to all connections except the source."""
+    successful_broadcasts = 0
+    failed_broadcasts = 0
+    deleted_connections = 0
+    
+    logger.info(f"Starting broadcast to {len(connections)} connections (excluding source: {source_connection_id})")
+    
     for connection in connections:
         conn_id = connection['connectionId']
         if conn_id != source_connection_id:
@@ -39,16 +46,25 @@ def broadcast_message(apigw_client, connections, message, source_connection_id=N
                     ConnectionId=conn_id,
                     Data=json.dumps(message)
                 )
+                successful_broadcasts += 1
+                logger.debug(f"Successfully sent message to connection {conn_id}")
             except apigw_client.exceptions.GoneException:
                 logger.info(f"Connection {conn_id} is stale. Deleting.")
                 if table:
                     table.delete_item(Key={'connectionId': conn_id})
+                deleted_connections += 1
             except Exception as e:
                 logger.error(f"Error posting to connection {conn_id}: {str(e)}")
+                failed_broadcasts += 1
+    
+    logger.info(f"Broadcast summary: {successful_broadcasts} successful, {failed_broadcasts} failed, {deleted_connections} stale connections deleted")
 
 def lambda_handler(event, context):
+    # Extract connection information
     request_context = event.get('requestContext', {})
     source_connection_id = request_context.get('connectionId')
+    domain = request_context.get('domainName')
+    stage = request_context.get('stage')
     
     logger.info(f"Message event from connectionId: {source_connection_id}")
     logger.debug(f"Received event body: {event.get('body')}")
@@ -83,16 +99,36 @@ def lambda_handler(event, context):
         if not apigw_management_client:
             return {'statusCode': 500, 'body': 'Could not initialize API Gateway Management client.'}
 
+        # Construct endpoint URL for WebSocket API
+        endpoint_url = f"https://{domain}/{stage}"
+
         # Send event to EventBridge
         eventbridge = boto3.client('events')
-        event_response = eventbridge.put_events(
-            Entries=[{
-                'Source': os.environ.get('EVENT_SOURCE', 'game-server'),
-                'DetailType': os.environ.get('EVENT_DETAIL_TYPE', 'GameEvent'),
-                'Detail': json.dumps(message_body),
-                'EventBusName': os.environ.get('EVENT_BUS_NAME')
-            }]
-        )
+        logger.info(f"Sending event to EventBridge: {message_body}")
+        try:
+            event_response = eventbridge.put_events(
+                Entries=[{
+                    'Source': os.environ.get('EVENT_SOURCE', 'voice-chat'),
+                    'DetailType': 'SendAudioEvent',
+                    'Detail': json.dumps({
+                        'status': 'PENDING',
+                        'message': message_body,
+                        'timestamp': datetime.utcnow().isoformat(),
+                        'connection_id': source_connection_id,
+                        'endpoint_url': endpoint_url,
+                        'websocket_context': {
+                            'domain_name': domain,
+                            'stage': stage,
+                            'connection_id': source_connection_id
+                        }
+                    }),
+                    'EventBusName': os.environ.get('EVENT_BUS_NAME')
+                }]
+            )
+            logger.info(f"Successfully sent event to EventBridge. Response: {event_response}")
+        except Exception as e:
+            logger.error(f"Failed to send event to EventBridge: {str(e)}")
+            raise  # Re-raise the exception to be caught by the outer try-catch
         
         # Broadcast message to other clients
         broadcast_message(

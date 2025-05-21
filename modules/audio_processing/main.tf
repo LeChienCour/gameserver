@@ -1,3 +1,6 @@
+# Get current account ID
+data "aws_caller_identity" "current" {}
+
 # KMS Key for audio encryption
 resource "aws_kms_key" "audio_key" {
   description             = "KMS key for audio encryption"
@@ -15,16 +18,17 @@ resource "aws_lambda_function" "process_audio" {
   filename         = var.lambda_functions.process_audio
   function_name    = "${var.prefix}-process-audio"
   role            = aws_iam_role.lambda_role.arn
-  handler         = "main.lambda_handler"
+  handler         = "lambda_function.lambda_handler"
   runtime         = "python3.10"
   timeout         = 300
   memory_size     = 1024
 
   environment {
     variables = {
-      AUDIO_BUCKET_NAME = var.audio_bucket_name
-      KMS_KEY_ID       = aws_kms_key.audio_key.id
-      EVENT_BUS_ARN    = var.event_bus_arn
+      AUDIO_BUCKET = var.audio_bucket_name
+      KMS_KEY_ID = aws_kms_key.audio_key.id
+      EVENT_BUS_ARN = var.event_bus_arn
+      CONNECTIONS_TABLE = var.connections_table
     }
   }
 }
@@ -34,7 +38,7 @@ resource "aws_lambda_function" "validate_audio" {
   filename         = var.lambda_functions.validate_audio
   function_name    = "${var.prefix}-validate-audio"
   role            = aws_iam_role.lambda_role.arn
-  handler         = "main.lambda_handler"
+  handler         = "lambda_function.lambda_handler"
   runtime         = "python3.10"
   timeout         = 30
   memory_size     = 256
@@ -42,6 +46,8 @@ resource "aws_lambda_function" "validate_audio" {
   environment {
     variables = {
       EVENT_BUS_ARN = var.event_bus_arn
+      CONNECTIONS_TABLE = var.connections_table
+      ECHO_MODE = var.enable_echo_mode
     }
   }
 }
@@ -98,7 +104,29 @@ resource "aws_iam_role_policy" "lambda_policy" {
         Action = [
           "events:PutEvents"
         ]
-        Resource = var.event_bus_arn
+        Resource = [
+          var.event_bus_arn,
+          "arn:aws:events:*:${data.aws_caller_identity.current.account_id}:event-bus/default"
+        ]
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "dynamodb:GetItem",
+          "dynamodb:PutItem",
+          "dynamodb:DeleteItem",
+          "dynamodb:Scan",
+          "dynamodb:Query",
+          "dynamodb:UpdateItem"
+        ]
+        Resource = "arn:aws:dynamodb:*:${data.aws_caller_identity.current.account_id}:table/${var.connections_table}"
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "execute-api:ManageConnections"
+        ]
+        Resource = "arn:aws:execute-api:*:${data.aws_caller_identity.current.account_id}:*/${var.environment}/POST/@connections/*"
       },
       {
         Effect = "Allow"
@@ -124,6 +152,14 @@ resource "aws_cloudwatch_event_rule" "audio_processing_rule" {
     detail-type = ["SendAudioEvent"]
     detail = {
       status = ["PENDING"]
+      websocket_context = {
+        domain_name = [{ "exists": true }]
+        stage = [{ "exists": true }]
+        connection_id = [{ "exists": true }]
+      }
+      message = {
+        data = [{ "exists": true }]
+      }
     }
   })
 }
@@ -146,7 +182,16 @@ resource "aws_cloudwatch_event_rule" "audio_validation_rule" {
     source      = [var.event_source]
     detail-type = ["SendAudioEvent"]
     detail = {
-      status = ["PROCESSING"]
+      status = ["PENDING"]
+      websocket_context = {
+        domain_name = [{ "exists": true }]
+        stage = [{ "exists": true }]
+        connection_id = [{ "exists": true }]
+      }
+      message = {
+        data = [{ "exists": true }]
+        author = [{ "exists": true }]
+      }
     }
   })
 }

@@ -44,4 +44,15 @@ variable "event_source" {
   description = "Source name for EventBridge events"
   type        = string
   default     = "voice-chat"
+}
+
+variable "enable_echo_mode" {
+  description = "Enable echo mode for testing (audio will be sent back to sender)"
+  type        = string
+  default     = "false"
+}
+
+variable "connections_table" {
+  description = "Name of the DynamoDB table for WebSocket connections"
+  type        = string
 } 

@@ -163,3 +163,9 @@ variable "eventbridge_log_retention_days" {
   type        = number
   default     = 30
 }
+
+variable "enable_echo_mode" {
+  description = "Enable echo mode for testing (audio will be sent back to sender)"
+  type        = string
+  default     = "false"
+}

@@ -171,7 +171,9 @@ resource "aws_lambda_function" "message" {
   environment {
     variables = merge(
       {
-        CONNECTIONS_TABLE = var.connections_table
+        CONNECTIONS_TABLE = var.connections_table,
+        EVENT_BUS_NAME = var.event_bus_name,
+        EVENT_SOURCE = var.event_source
       },
       var.lambda_environment_variables
     )

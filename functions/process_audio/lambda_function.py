@@ -3,123 +3,166 @@ import boto3
 import base64
 import os
 from datetime import datetime
+import logging
 
-dynamodb = boto3.client('dynamodb')
 s3 = boto3.client('s3')
 eventbridge = boto3.client('events')
-apigatewaymanagementapi = None
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
 
-def get_api_client(endpoint_url):
-    global apigatewaymanagementapi
-    if apigatewaymanagementapi is None:
-        apigatewaymanagementapi = boto3.client(
-            'apigatewaymanagementapi',
-            endpoint_url=endpoint_url
-        )
-    return apigatewaymanagementapi
+# Validate required environment variables
+def validate_env_vars():
+    """Validate required environment variables are set"""
+    required_vars = ['AUDIO_BUCKET']
+    missing_vars = [var for var in required_vars if not os.environ.get(var)]
+    if missing_vars:
+        raise ValueError(f"Missing required environment variables: {', '.join(missing_vars)}")
 
-def broadcast_audio(connections, audio_data, author, connection_id, endpoint_url):
-    api_client = get_api_client(endpoint_url)
-    
-    # Prepare the message
-    message = {
-        'action': 'audio',
-        'data': {
-            'audio': audio_data,
-            'author': author,
-            'timestamp': datetime.utcnow().isoformat()
+def get_websocket_context(event):
+    """Extract WebSocket context from either direct WebSocket event or EventBridge event"""
+    if 'requestContext' in event:
+        # Direct WebSocket event
+        request_context = event.get('requestContext', {})
+        return {
+            'domain_name': request_context.get('domainName'),
+            'stage': request_context.get('stage'),
+            'connection_id': request_context.get('connectionId')
         }
-    }
+    elif 'detail' in event:
+        # EventBridge event
+        detail = event.get('detail', {})
+        if isinstance(detail, str):
+            detail = json.loads(detail)
+        
+        websocket_context = detail.get('websocket_context', {})
+        if websocket_context:
+            return {
+                'domain_name': websocket_context.get('domain_name'),
+                'stage': websocket_context.get('stage'),
+                'connection_id': websocket_context.get('connection_id')
+            }
     
-    # Convert message to JSON
-    message_json = json.dumps(message)
+    return None
+
+def get_audio_data(event):
+    """Extract audio data from either WebSocket or EventBridge event"""
+    if 'body' in event:
+        # WebSocket event
+        try:
+            body = json.loads(event.get('body', '{}'))
+            return {
+                'audio_data': body.get('data'),
+                'author': body.get('author', 'Anonymous')
+            }
+        except json.JSONDecodeError as e:
+            logger.error(f"Invalid JSON in WebSocket message: {str(e)}")
+            return None
+    elif 'detail' in event:
+        # EventBridge event
+        detail = event.get('detail', {})
+        if isinstance(detail, str):
+            detail = json.loads(detail)
+        
+        message = detail.get('message', {})
+        if isinstance(message, str):
+            message = json.loads(message)
+            
+        return {
+            'audio_data': message.get('data'),
+            'author': message.get('author', 'Anonymous')
+        }
     
-    # Broadcast to all connections except sender
-    for conn in connections:
-        if conn != connection_id:  # Don't send back to sender
-            try:
-                api_client.post_to_connection(
-                    Data=message_json,
-                    ConnectionId=conn
-                )
-            except Exception as e:
-                print(f"Error sending to connection {conn}: {str(e)}")
-                if "GoneException" in str(e):
-                    # Connection is no longer valid, remove it
-                    try:
-                        dynamodb.delete_item(
-                            TableName=os.environ['CONNECTIONS_TABLE'],
-                            Key={'connectionId': {'S': conn}}
-                        )
-                    except Exception as del_err:
-                        print(f"Error deleting connection {conn}: {str(del_err)}")
+    return None
 
 def lambda_handler(event, context):
-    # Extract connection information
-    domain = event['requestContext']['domainName']
-    stage = event['requestContext']['stage']
-    connection_id = event['requestContext']['connectionId']
-    endpoint_url = f"https://{domain}/{stage}"
+    """Main handler that processes audio from both WebSocket and EventBridge events"""
+    logger.info(f"Received event: {json.dumps(event)}")
     
     try:
-        # Parse the message body
-        body = json.loads(event['body'])
-        audio_data = body.get('data')
-        author = body.get('author', 'Anonymous')
+        # Validate environment variables
+        validate_env_vars()
         
-        if not audio_data:
-            return {'statusCode': 400, 'body': 'Audio data is required'}
-        
+        # Get WebSocket context
+        ws_context = get_websocket_context(event)
+        if not ws_context or not all([ws_context['domain_name'], ws_context['stage'], ws_context['connection_id']]):
+            logger.error("Missing required WebSocket context")
+            return {
+                'statusCode': 400,
+                'body': 'Missing WebSocket context'
+            }
+            
+        # Get audio data
+        audio_info = get_audio_data(event)
+        if not audio_info or not audio_info['audio_data']:
+            logger.error("Missing required audio data")
+            return {
+                'statusCode': 400,
+                'body': 'Audio data is required'
+            }
+            
         # Store audio in S3
         timestamp = datetime.utcnow().strftime('%Y%m%d_%H%M%S')
-        s3_key = f"audio/{author}/{timestamp}.pcm"
+        s3_key = f"audio/{audio_info['author']}/{timestamp}.pcm"
         
         try:
             s3.put_object(
                 Bucket=os.environ['AUDIO_BUCKET'],
                 Key=s3_key,
-                Body=base64.b64decode(audio_data)
+                Body=base64.b64decode(audio_info['audio_data'])
             )
+            logger.info(f"Successfully stored audio in S3: {s3_key}")
         except Exception as e:
-            print(f"Error storing audio in S3: {str(e)}")
+            logger.error(f"Error storing audio in S3: {str(e)}")
             return {'statusCode': 500, 'body': 'Error storing audio'}
         
-        # Publish event to EventBridge
-        event_response = eventbridge.put_events(
-            Entries=[{
-                'Source': os.environ.get('EVENT_SOURCE', 'game-server.audio'),
+        # Send event to validation
+        try:
+            event_detail = {
+                'status': 'PENDING',
+                'message': {
+                    'action': 'sendaudio',
+                    'data': audio_info['audio_data'],
+                    'author': audio_info['author']
+                },
+                'websocket_context': ws_context,
+                's3_key': s3_key,
+                'timestamp': datetime.utcnow().isoformat()
+            }
+            
+            event_entry = {
+                'Source': os.environ.get('EVENT_SOURCE', 'voice-chat'),
                 'DetailType': 'SendAudioEvent',
-                'Detail': json.dumps({
-                    'status': 'PENDING',
-                    'author': author,
-                    's3_key': s3_key,
-                    'timestamp': datetime.utcnow().isoformat()
-                }),
-                'EventBusName': os.environ['EVENT_BUS_NAME']
-            }]
-        )
-        
-        # Get all connections
-        response = dynamodb.scan(
-            TableName=os.environ['CONNECTIONS_TABLE'],
-            ProjectionExpression='connectionId'
-        )
-        connections = [item['connectionId']['S'] for item in response.get('Items', [])]
-        
-        # Broadcast the audio to all other connections
-        broadcast_audio(connections, audio_data, author, connection_id, endpoint_url)
-        
-        return {
-            'statusCode': 200,
-            'body': json.dumps({
-                'message': 'Audio processed and broadcast successfully',
-                'eventbridge_response': event_response
-            })
-        }
-        
+                'Detail': json.dumps(event_detail),
+            }
+            
+            # Add EventBusName only if specified, otherwise use default event bus
+            event_bus_name = os.environ.get('EVENT_BUS_NAME')
+            if event_bus_name:
+                event_entry['EventBusName'] = event_bus_name
+            
+            event_response = eventbridge.put_events(Entries=[event_entry])
+            logger.info(f"Successfully sent event for validation. Response: {event_response}")
+            
+            return {
+                'statusCode': 200,
+                'body': json.dumps({
+                    'message': 'Audio stored and sent for validation',
+                    's3_key': s3_key
+                })
+            }
+        except Exception as e:
+            error_msg = f"Error sending event for validation: {str(e)}"
+            logger.error(error_msg)
+            return {
+                'statusCode': 500,
+                'body': json.dumps({'error': error_msg})
+            }
+            
     except Exception as e:
-        print(f"Error processing audio: {str(e)}")
+        error_msg = f"Error in lambda_handler: {str(e)}"
+        logger.error(error_msg)
+        logger.error(f"Full event: {json.dumps(event)}")
         return {
             'statusCode': 500,
-            'body': json.dumps({'error': str(e)})
+            'body': json.dumps({'error': error_msg})
         } 

@@ -33,6 +33,16 @@ variable "event_bus_arn" {
   type        = string
 }
 
+variable "event_bus_name" {
+  description = "Name of the EventBridge event bus"
+  type        = string
+}
+
+variable "event_source" {
+  description = "Source name for EventBridge events"
+  type        = string
+}
+
 variable "connections_table" {
   description = "Name of the DynamoDB table for WebSocket connections"
   type        = string
