@@ -542,35 +542,39 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 
 ### Audio Flow Verification
 1. **Process Audio to Listener Flow**
-   - [ ] Verify audio storage in S3
-   - [ ] Verify EventBridge event handling
-   - [ ] Test broadcasting to multiple listeners
-   - [ ] Validate WebSocket context preservation
-   - [ ] Check error handling and logging
-   - [ ] Test stale connection cleanup
-   - [ ] Verify audio format and quality
-   - [ ] Monitor latency and performance
+   - [x] Verify audio storage in S3
+   - [x] Verify EventBridge event handling
+   - [x] Test broadcasting to multiple listeners
+   - [x] Validate WebSocket context preservation
+   - [ ] Verify client message reception
+   - [ ] Test client audio playback
+   - [ ] Verify audio format and quality in client
+   - [ ] Monitor end-to-end latency
 
 2. **Testing Scenarios**
-   - [ ] Single sender, multiple listeners
+   - [x] Single sender audio transmission
    - [ ] Multiple concurrent senders
-   - [ ] Reconnection handling
+   - [ ] Client reconnection handling
    - [ ] Network interruption recovery
    - [ ] Large audio payload handling
    - [ ] Error condition recovery
 
 3. **Monitoring Points**
-   - [ ] CloudWatch Logs for process-audio Lambda
-   - [ ] EventBridge event delivery success
-   - [ ] S3 object creation
-   - [ ] WebSocket connection status
-   - [ ] Broadcasting success rate
-   - [ ] Error rates and types
+   - [x] CloudWatch Logs for process-audio Lambda
+   - [x] EventBridge event delivery success
+   - [x] S3 object creation verification
+   - [x] WebSocket API Gateway message delivery
+   - [ ] Client message reception confirmation
+   - [ ] Client-side error logging
+   - [ ] End-to-end latency metrics
 
 4. **Success Criteria**
-   - All listeners receive audio within acceptable latency
-   - No duplicate broadcasts
-   - Proper error handling and recovery
-   - Clean connection management
-   - Consistent audio quality
-   - Resource cleanup on failures
+   - [x] Audio successfully stored in S3
+   - [x] Events properly processed through EventBridge
+   - [x] API Gateway successfully sends messages
+   - [ ] All listeners receive and play audio
+   - [ ] No duplicate audio playback
+   - [ ] Proper client-side error handling
+   - [ ] Clean connection management in client
+   - [ ] Consistent audio quality in playback
+   - [ ] Resource cleanup on client disconnection

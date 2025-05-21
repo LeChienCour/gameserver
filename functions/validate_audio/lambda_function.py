@@ -43,27 +43,35 @@ def broadcast_audio(connections, audio_data, author, connection_id, endpoint_url
     is_echo_mode = os.environ.get('ECHO_MODE', 'false').lower() == 'true'
     logger.info(f"Broadcasting in {'echo' if is_echo_mode else 'normal'} mode")
     
+    # Log connection details before broadcasting
+    logger.info(f"Total connections to broadcast to: {len(connections)}")
+    logger.info(f"Source connection ID: {connection_id}")
+    logger.info(f"Connections list: {connections}")
+    
     # Broadcast to connections
     for conn in connections:
         # In echo mode, we also send to the source connection
         if is_echo_mode or conn != connection_id:
             try:
+                logger.info(f"Attempting to send to connection {conn}")
                 api_client.post_to_connection(
                     Data=message_json,
                     ConnectionId=conn
                 )
                 successful_broadcasts += 1
-                logger.debug(f"Successfully sent message to connection {conn}")
+                logger.info(f"Successfully sent message to connection {conn}")
             except Exception as e:
                 logger.error(f"Error sending to connection {conn}: {str(e)}")
                 if "GoneException" in str(e):
                     # Connection is no longer valid, remove it
                     try:
+                        logger.info(f"Removing stale connection {conn} from DynamoDB")
                         dynamodb.delete_item(
                             TableName=os.environ['CONNECTIONS_TABLE'],
                             Key={'connectionId': {'S': conn}}
                         )
                         deleted_connections += 1
+                        logger.info(f"Successfully removed stale connection {conn}")
                     except Exception as del_err:
                         logger.error(f"Error deleting connection {conn}: {str(del_err)}")
                 else:
@@ -91,7 +99,41 @@ def validate_audio_format(audio_data):
 
 def lambda_handler(event, context):
     try:
+        # Log the event for debugging
         logger.info(f"Received event: {json.dumps(event)}")
+        
+        # Get environment variables
+        connections_table = os.environ.get('CONNECTIONS_TABLE')
+        logger.info(f"Using connections table: {connections_table}")
+        
+        # Get all connections for broadcasting
+        try:
+            logger.info("Scanning DynamoDB for active connections...")
+            response = dynamodb.scan(
+                TableName=connections_table,
+                ProjectionExpression='connectionId'
+            )
+            connections = [item['connectionId']['S'] for item in response.get('Items', [])]
+            logger.info(f"Found {len(connections)} active connections")
+            logger.info(f"Active connections: {connections}")
+            
+            # Check if we got any connections
+            if not connections:
+                logger.warning("No active connections found in DynamoDB table")
+            
+            # Log table contents for debugging
+            full_table_scan = dynamodb.scan(
+                TableName=connections_table
+            )
+            logger.info(f"Full table contents: {json.dumps(full_table_scan.get('Items', []))}")
+            
+        except Exception as e:
+            error_msg = f"Error scanning DynamoDB connections table: {str(e)}"
+            logger.error(error_msg)
+            return {
+                'statusCode': 500,
+                'body': json.dumps({'error': error_msg})
+            }
         
         # EventBridge events come with the detail field directly
         if not isinstance(event.get('detail'), dict):
@@ -141,22 +183,6 @@ def lambda_handler(event, context):
             return {
                 'statusCode': 400,
                 'body': json.dumps({'error': message})
-            }
-        
-        # Get all connections for broadcasting
-        try:
-            response = dynamodb.scan(
-                TableName=os.environ['CONNECTIONS_TABLE'],
-                ProjectionExpression='connectionId'
-            )
-            connections = [item['connectionId']['S'] for item in response.get('Items', [])]
-            logger.info(f"Found {len(connections)} active connections")
-        except Exception as e:
-            error_msg = f"Error scanning DynamoDB connections table: {str(e)}"
-            logger.error(error_msg)
-            return {
-                'statusCode': 500,
-                'body': json.dumps({'error': error_msg})
             }
         
         # Broadcast the validated audio

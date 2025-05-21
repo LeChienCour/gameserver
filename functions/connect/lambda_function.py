@@ -2,6 +2,7 @@ import json
 import boto3
 import os
 import logging
+from datetime import datetime
 
 # Configure logging
 logger = logging.getLogger()
@@ -18,13 +19,16 @@ if table_name:
     table = dynamodb.Table(table_name)
 
 def lambda_handler(event, context):
+    # Log the full event for debugging
+    logger.info(f"Received connect event: {json.dumps(event)}")
+    
     connection_id = event.get('requestContext', {}).get('connectionId')
     domain_name = event.get('requestContext', {}).get('domainName')
     stage = event.get('requestContext', {}).get('stage')
     
     logger.info(f"Connect event for connectionId: {connection_id}")
     logger.info(f"Domain: {domain_name}, Stage: {stage}")
-
+    logger.info(f"Using DynamoDB table: {table_name}")
 
     if not connection_id:
         logger.error("Connection ID not found in event")
@@ -35,14 +39,28 @@ def lambda_handler(event, context):
         return {'statusCode': 500, 'body': 'Server configuration error.'}
 
     try:
-        table.put_item(
-            Item={
-                'connectionId': connection_id,
-                'connectedAt': context.aws_request_id # Using aws_request_id as a simple timestamp/unique id for connect
-                # You might want to add a proper ISO timestamp: datetime.utcnow().isoformat()
-                # 'timestamp': datetime.datetime.utcnow().isoformat() # Requires 'import datetime'
-            }
-        )
+        # Create connection record with timestamp
+        connection_item = {
+            'connectionId': connection_id,
+            'connectedAt': datetime.utcnow().isoformat(),
+            'domain': domain_name,
+            'stage': stage
+        }
+        
+        logger.info(f"Storing connection item: {json.dumps(connection_item)}")
+        
+        table.put_item(Item=connection_item)
+        
+        # Verify the connection was stored
+        try:
+            verification = table.get_item(Key={'connectionId': connection_id})
+            if 'Item' in verification:
+                logger.info(f"Successfully verified connection storage: {json.dumps(verification['Item'])}")
+            else:
+                logger.warning(f"Connection verification failed - item not found after storage")
+        except Exception as ve:
+            logger.error(f"Error verifying connection storage: {str(ve)}")
+        
         logger.info(f"Connection {connection_id} stored successfully.")
         return {'statusCode': 200, 'body': 'Connected.'}
     except Exception as e:
