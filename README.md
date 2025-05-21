@@ -16,7 +16,7 @@ The infrastructure consists of several key components:
    - Connection management (connect/disconnect)
    - Message handling
    - Audio processing
-   - Audio validation
+   - Audio validation and broadcasting
 
 3. **Storage**
    - DynamoDB for WebSocket connections
@@ -31,6 +31,7 @@ The infrastructure consists of several key components:
    - Cognito for user authentication
    - API keys for WebSocket access
    - IAM roles and policies
+   - KMS encryption for audio data
 
 ## Audio Flow
 
@@ -44,11 +45,11 @@ The voice chat system follows this flow:
 2. **Audio Transmission**
    - Client captures audio and sends via WebSocket
    - Audio data is base64 encoded
-   - Uses 'sendaudio' or 'audio' route
+   - Uses 'sendaudio' route
    - Message format:
      ```json
      {
-       "action": "audio",
+       "action": "sendaudio",
        "data": "base64_encoded_audio",
        "author": "username"
      }
@@ -56,21 +57,21 @@ The voice chat system follows this flow:
 
 3. **Processing Pipeline**
    ```
-   Client -> WebSocket API -> Message Lambda -> EventBridge -> Process Audio Lambda -> Broadcast to Listeners
+   Client -> WebSocket API -> Message Lambda -> EventBridge -> Process Audio Lambda -> EventBridge -> Validate Audio Lambda -> Broadcast to Listeners
    ```
 
    a. **Initial Reception (Message Lambda)**
       - Receives WebSocket message
       - Validates basic message structure
-      - Publishes event to EventBridge with WebSocket context:
+      - Publishes event to EventBridge:
         ```json
         {
-          "Source": "game-server.audio",
+          "Source": "voice-chat",
           "DetailType": "SendAudioEvent",
           "Detail": {
             "status": "PENDING",
             "message": {
-              "action": "audio",
+              "action": "sendaudio",
               "data": "base64_encoded_audio",
               "author": "username"
             },
@@ -87,15 +88,36 @@ The voice chat system follows this flow:
    b. **Audio Processing (Process Audio Lambda)**
       - Triggered by EventBridge rule on PENDING status
       - Stores audio in S3 with path: `audio/{author}/{timestamp}.pcm`
-      - Retrieves active connections from DynamoDB
-      - Broadcasts audio to other connected clients
-      - Handles stale connection cleanup
+      - Forwards event to validation with S3 reference
+      - Event format:
+        ```json
+        {
+          "Source": "voice-chat",
+          "DetailType": "SendAudioEvent",
+          "Detail": {
+            "status": "PENDING",
+            "message": {
+              "action": "sendaudio",
+              "data": "base64_encoded_audio",
+              "author": "username"
+            },
+            "websocket_context": {
+              "domain_name": "api-domain",
+              "stage": "stage-name",
+              "connection_id": "connection-id"
+            },
+            "s3_key": "audio/{author}/{timestamp}.pcm",
+            "timestamp": "ISO8601_timestamp"
+          }
+        }
+        ```
 
-   c. **Broadcasting**
-      - Process Audio Lambda handles broadcasting
-      - Uses DynamoDB to get active connections
-      - Sends audio to all clients except sender
-      - Message format:
+   c. **Audio Validation and Broadcasting (Validate Audio Lambda)**
+      - Validates audio format and size
+      - Retrieves active connections from DynamoDB
+      - Broadcasts validated audio to all listeners except sender
+      - Handles stale connection cleanup
+      - Broadcast message format:
         ```json
         {
           "action": "audio",
@@ -112,6 +134,12 @@ The voice chat system follows this flow:
    - S3 errors: Return 500 error, log failure
    - EventBridge errors: Log and return appropriate status
    - Broadcasting errors: Log and cleanup stale connections
+   - Audio validation errors: Return 400 error with reason
+
+5. **Testing Mode**
+   - Echo mode available for testing (set via `enable_echo_mode`)
+   - When enabled, audio is sent back to sender
+   - Useful for testing audio capture and playback
 
 ## Detailed Information Flow
 
@@ -417,6 +445,21 @@ Key environment variables used in the Lambda functions:
 - EVENT_BUS_NAME: EventBridge bus name
 - EVENT_SOURCE: Event source identifier
 - EVENT_DETAIL_TYPE: Event detail type
+
+### Message Lambda
+- CONNECTIONS_TABLE: DynamoDB table for connections
+- EVENT_SOURCE: Source name for EventBridge events
+- EVENT_BUS_NAME: Name of the EventBridge bus
+
+### Process Audio Lambda
+- AUDIO_BUCKET: S3 bucket for audio storage
+- KMS_KEY_ID: KMS key for audio encryption
+- EVENT_BUS_ARN: EventBridge bus ARN
+- CONNECTIONS_TABLE: DynamoDB table for connections
+
+### Validate Audio Lambda
+- CONNECTIONS_TABLE: DynamoDB table for connections
+- ECHO_MODE: Enable/disable echo testing mode
 
 ## Security
 

@@ -126,7 +126,10 @@ resource "aws_iam_role_policy" "lambda_policy" {
         Action = [
           "execute-api:ManageConnections"
         ]
-        Resource = "arn:aws:execute-api:*:${data.aws_caller_identity.current.account_id}:*/${var.environment}/POST/@connections/*"
+        Resource = [
+          "arn:aws:execute-api:*:${data.aws_caller_identity.current.account_id}:*/@connections/*",
+          "arn:aws:execute-api:*:${data.aws_caller_identity.current.account_id}:*/*/POST/@connections/*"
+        ]
       },
       {
         Effect = "Allow"
