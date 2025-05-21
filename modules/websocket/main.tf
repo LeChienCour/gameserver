@@ -302,7 +302,7 @@ resource "aws_apigatewayv2_route" "audio" {
   target    = "integrations/${aws_apigatewayv2_integration.audio.id}"
 }
 
-# Default route for any other action (optional)
+# Default route for any other action
 resource "aws_apigatewayv2_route" "default" {
   api_id    = aws_apigatewayv2_api.websocket_api.id
   route_key = "$default"
@@ -363,6 +363,15 @@ resource "aws_lambda_permission" "audio" {
   statement_id  = "AllowAPIGatewayInvoke"
   action        = "lambda:InvokeFunction"
   function_name = aws_lambda_function.audio.function_name
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "${aws_apigatewayv2_api.websocket_api.execution_arn}/*/*"
+}
+
+# Lambda permission for default route
+resource "aws_lambda_permission" "default" {
+  statement_id  = "AllowAPIGatewayInvokeDefault"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.message.function_name
   principal     = "apigateway.amazonaws.com"
   source_arn    = "${aws_apigatewayv2_api.websocket_api.execution_arn}/*/*"
 } 

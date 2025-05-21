@@ -3,10 +3,13 @@ import boto3
 import os
 import logging
 from datetime import datetime
+from botocore.exceptions import ClientError
 
+# Configure logging
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
+# Initialize DynamoDB resource
 dynamodb = boto3.resource('dynamodb')
 table_name = os.environ.get('CONNECTIONS_TABLE')
 if not table_name:
@@ -15,10 +18,6 @@ if not table_name:
 table = None
 if table_name:
     table = dynamodb.Table(table_name)
-
-# Note: The ApiGatewayManagementApi client needs the correct endpoint.
-# This endpoint is constructed from the event a Lambda receives from API Gateway when invoked.
-# It's usually event['requestContext']['domainName'] + '/' + event['requestContext']['stage']
 
 def get_api_gateway_management_client(event):
     domain_name = event.get('requestContext', {}).get('domainName')
@@ -30,34 +29,25 @@ def get_api_gateway_management_client(event):
     logger.info(f"API Gateway Management API endpoint: {endpoint_url}")
     return boto3.client('apigatewaymanagementapi', endpoint_url=endpoint_url)
 
-def broadcast_message(apigw_client, connections, message, source_connection_id=None, table=None):
-    """Broadcast a message to all connections except the source."""
-    successful_broadcasts = 0
-    failed_broadcasts = 0
-    deleted_connections = 0
-    
-    logger.info(f"Starting broadcast to {len(connections)} connections (excluding source: {source_connection_id})")
-    
-    for connection in connections:
-        conn_id = connection['connectionId']
-        if conn_id != source_connection_id:
-            try:
-                apigw_client.post_to_connection(
-                    ConnectionId=conn_id,
-                    Data=json.dumps(message)
-                )
-                successful_broadcasts += 1
-                logger.debug(f"Successfully sent message to connection {conn_id}")
-            except apigw_client.exceptions.GoneException:
-                logger.info(f"Connection {conn_id} is stale. Deleting.")
-                if table:
-                    table.delete_item(Key={'connectionId': conn_id})
-                deleted_connections += 1
-            except Exception as e:
-                logger.error(f"Error posting to connection {conn_id}: {str(e)}")
-                failed_broadcasts += 1
-    
-    logger.info(f"Broadcast summary: {successful_broadcasts} successful, {failed_broadcasts} failed, {deleted_connections} stale connections deleted")
+def send_pong_response(apigw_client, connection_id):
+    """Send pong response with connection ID."""
+    try:
+        response_message = {
+            'action': 'pong',
+            'data': {
+                'connectionId': connection_id,
+                'timestamp': datetime.utcnow().isoformat()
+            }
+        }
+        apigw_client.post_to_connection(
+            ConnectionId=connection_id,
+            Data=json.dumps(response_message)
+        )
+        logger.info(f"Successfully sent pong to {connection_id}")
+        return True
+    except Exception as e:
+        logger.error(f"Failed to send pong response: {str(e)}")
+        return False
 
 def lambda_handler(event, context):
     # Extract connection information
@@ -85,68 +75,70 @@ def lambda_handler(event, context):
             logger.error("No action specified in message")
             return {'statusCode': 400, 'body': 'No action specified'}
 
-        # Get all active connections
-        try:
-            response = table.scan(ProjectionExpression='connectionId')
-            connections = response.get('Items', [])
-            logger.info(f"Found {len(connections)} active connections")
-        except Exception as e:
-            logger.error(f"Error scanning DynamoDB connections table: {str(e)}")
-            return {'statusCode': 500, 'body': 'Could not retrieve connections.'}
-
         # Initialize API Gateway Management client
         apigw_management_client = get_api_gateway_management_client(event)
         if not apigw_management_client:
             return {'statusCode': 500, 'body': 'Could not initialize API Gateway Management client.'}
 
-        # Construct endpoint URL for WebSocket API
-        endpoint_url = f"https://{domain}/{stage}"
+        # Handle ping message
+        if action == 'ping':
+            if send_pong_response(apigw_management_client, source_connection_id):
+                return {'statusCode': 200, 'body': json.dumps({'message': 'Pong sent successfully'})}
+            return {'statusCode': 500, 'body': json.dumps({'error': 'Failed to send pong'})}
 
-        # Send event to EventBridge
-        eventbridge = boto3.client('events')
-        logger.info(f"Sending event to EventBridge: {message_body}")
-        try:
-            event_response = eventbridge.put_events(
-                Entries=[{
-                    'Source': os.environ.get('EVENT_SOURCE', 'voice-chat'),
-                    'DetailType': 'SendAudioEvent',
-                    'Detail': json.dumps({
-                        'status': 'PENDING',
-                        'message': message_body,
-                        'timestamp': datetime.utcnow().isoformat(),
-                        'connection_id': source_connection_id,
-                        'endpoint_url': endpoint_url,
-                        'websocket_context': {
-                            'domain_name': domain,
-                            'stage': stage,
-                            'connection_id': source_connection_id
-                        }
-                    }),
-                    'EventBusName': os.environ.get('EVENT_BUS_NAME')
-                }]
-            )
-            logger.info(f"Successfully sent event to EventBridge. Response: {event_response}")
-        except Exception as e:
-            logger.error(f"Failed to send event to EventBridge: {str(e)}")
-            raise  # Re-raise the exception to be caught by the outer try-catch
+        # Handle sendaudio message
+        if action == 'sendaudio':
+            # Get all active connections
+            try:
+                response = table.scan(ProjectionExpression='connectionId')
+                connections = response.get('Items', [])
+                logger.info(f"Found {len(connections)} active connections")
+            except Exception as e:
+                logger.error(f"Error scanning DynamoDB connections table: {str(e)}")
+                return {'statusCode': 500, 'body': 'Could not retrieve connections.'}
+
+            # Construct endpoint URL for WebSocket API
+            endpoint_url = f"https://{domain}/{stage}"
+
+            # Send event to EventBridge
+            eventbridge = boto3.client('events')
+            logger.info(f"Sending event to EventBridge: {message_body}")
+            try:
+                event_response = eventbridge.put_events(
+                    Entries=[{
+                        'Source': os.environ.get('EVENT_SOURCE', 'voice-chat'),
+                        'DetailType': 'SendAudioEvent',
+                        'Detail': json.dumps({
+                            'status': 'PENDING',
+                            'message': message_body,
+                            'timestamp': datetime.utcnow().isoformat(),
+                            'connection_id': source_connection_id,
+                            'endpoint_url': endpoint_url,
+                            'websocket_context': {
+                                'domain_name': domain,
+                                'stage': stage,
+                                'connection_id': source_connection_id
+                            }
+                        }),
+                        'EventBusName': os.environ.get('EVENT_BUS_NAME')
+                    }]
+                )
+                logger.info(f"Successfully sent event to EventBridge. Response: {event_response}")
+                return {
+                    'statusCode': 200,
+                    'body': json.dumps({
+                        'message': 'Event processed',
+                        'eventbridge_response': event_response
+                    })
+                }
+            except Exception as e:
+                logger.error(f"Failed to send event to EventBridge: {str(e)}")
+                return {'statusCode': 500, 'body': f"Failed to process audio event: {str(e)}"}
         
-        # Broadcast message to other clients
-        broadcast_message(
-            apigw_management_client,
-            connections,
-            message_body,
-            source_connection_id,
-            table
-        )
-
-        return {
-            'statusCode': 200,
-            'body': json.dumps({
-                'message': 'Event processed',
-                'eventbridge_response': event_response
-            })
-        }
-
+        # Unhandled action
+        logger.warning(f"Unhandled action type: {action}")
+        return {'statusCode': 400, 'body': json.dumps({'error': f'Unhandled action type: {action}'})}
+        
     except json.JSONDecodeError:
         logger.error(f"Invalid JSON received from {source_connection_id}: {event.get('body')}")
         return {'statusCode': 400, 'body': 'Invalid JSON format.'}
