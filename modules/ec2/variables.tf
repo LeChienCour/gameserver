@@ -40,3 +40,45 @@ variable "user_pool_client_id" {
   description = "Cognito User Pool Client ID"
   type        = string
 }
+
+variable "environment" {
+  description = "Environment name (e.g., dev, prod)"
+  type        = string
+  default     = "dev"
+}
+
+variable "minecraft_version" {
+  description = "Version of Minecraft to install"
+  type        = string
+  default     = "1.21.1"
+}
+
+variable "neoforge_version" {
+  description = "Version of NeoForge to install"
+  type        = string
+  default     = "1.21.1"
+}
+
+variable "server_memory" {
+  description = "Amount of memory to allocate to the Minecraft server (in GB)"
+  type        = number
+  default     = 4
+}
+
+variable "root_volume_size" {
+  description = "Size of the root volume in GB"
+  type        = number
+  default     = 30
+}
+
+variable "log_retention_days" {
+  description = "Number of days to retain CloudWatch logs"
+  type        = number
+  default     = 30
+}
+
+variable "java_parameters" {
+  description = "Additional Java parameters for the Minecraft server"
+  type        = string
+  default     = ""
+}

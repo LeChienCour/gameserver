@@ -67,6 +67,18 @@ resource "aws_iam_instance_profile" "game_server_profile" {
   role = aws_iam_role.game_server_role.name
 }
 
+# Cargar script de user data
+data "template_file" "user_data" {
+  template = file("${path.module}/userdata.sh")
+
+  vars = {
+    minecraft_version = var.minecraft_version
+    neoforge_version = var.neoforge_version
+    server_memory = var.server_memory
+    java_parameters = var.java_parameters
+  }
+}
+
 # EC2 Instance
 resource "aws_instance" "game_server" {
   ami           = var.ami_id
@@ -76,32 +88,19 @@ resource "aws_instance" "game_server" {
   vpc_security_group_ids = [var.security_group_id]
   iam_instance_profile   = aws_iam_instance_profile.game_server_profile.name
 
-  user_data = <<-EOF
-              #!/bin/bash
-              # Install required packages
-              apt-get update
-              apt-get install -y nodejs npm
+  user_data = data.template_file.user_data.rendered
+  user_data_replace_on_change = true
 
-              # Create application directory
-              mkdir -p /opt/game-server
-              cd /opt/game-server
-
-              # Create environment file
-              cat > .env << EOL
-              GAME_PORT=${var.game_port}
-              WEBSOCKET_PORT=${var.websocket_port}
-              USER_POOL_ID=${var.user_pool_id}
-              USER_POOL_CLIENT_ID=${var.user_pool_client_id}
-              AWS_REGION=${data.aws_region.current.name}
-              EOL
-
-              # Start the application
-              npm install
-              npm start
-              EOF
+  root_block_device {
+    volume_size = var.root_volume_size
+    volume_type = "gp3"
+    encrypted   = true
+  }
 
   tags = {
-    Name = "game-server"
+    Name = "minecraft-neoforge-server"
+    Environment = var.environment
+    Managed_by = "terraform"
   }
 }
 
@@ -116,6 +115,18 @@ resource "aws_eip" "game_server_eip" {
   domain   = "vpc"
 
   tags = {
-    Name = "game-server-eip"
+    Name = "minecraft-server-eip"
+    Environment = var.environment
+  }
+}
+
+# CloudWatch Logs
+resource "aws_cloudwatch_log_group" "minecraft_logs" {
+  name              = "/minecraft/server/${var.environment}"
+  retention_in_days = var.log_retention_days
+
+  tags = {
+    Environment = var.environment
+    Managed_by  = "terraform"
   }
 }
