@@ -29,4 +29,50 @@ resource "aws_cloudwatch_event_target" "log_target" {
   event_bus_name = aws_cloudwatch_event_bus.game_event_bus.name
   target_id      = "${var.prefix}LogTarget"
   arn            = aws_cloudwatch_log_group.game_event_logs.arn
+}
+
+# Audio Processing Event Rules
+resource "aws_cloudwatch_event_rule" "audio_processing_rule" {
+  name        = "${var.prefix}-audio-processing-rule"
+  description = "Rule for processing audio events"
+  event_bus_name = aws_cloudwatch_event_bus.game_event_bus.name
+
+  event_pattern = jsonencode({
+    source      = [var.event_source]
+    detail-type = ["SendAudioEvent"]
+    detail = {
+      status = ["PENDING"]
+      websocket_context = {
+        domain_name = [{ "exists": true }]
+        stage = [{ "exists": true }]
+        connection_id = [{ "exists": true }]
+      }
+      message = {
+        data = [{ "exists": true }]
+      }
+    }
+  })
+}
+
+resource "aws_cloudwatch_event_rule" "audio_validation_rule" {
+  name        = "${var.prefix}-audio-validation-rule"
+  description = "Rule for validating audio events"
+  event_bus_name = aws_cloudwatch_event_bus.game_event_bus.name
+
+  event_pattern = jsonencode({
+    source      = [var.event_source]
+    detail-type = ["SendAudioEvent"]
+    detail = {
+      status = ["PENDING"]
+      websocket_context = {
+        domain_name = [{ "exists": true }]
+        stage = [{ "exists": true }]
+        connection_id = [{ "exists": true }]
+      }
+      message = {
+        data = [{ "exists": true }]
+        author = [{ "exists": true }]
+      }
+    }
+  })
 } 

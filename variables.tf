@@ -1,13 +1,33 @@
 # variables.tf
 
+# AWS Region and Environment Configuration
 variable "region" {
   description = "AWS region"
   type        = string
   default     = "us-east-1"
 }
 
+variable "environment" {
+  description = "Environment name"
+  type        = string
+  default     = "dev"
+}
+
+variable "project_name" {
+  description = "Name of the project"
+  type        = string
+  default     = "gameserver"
+}
+
+variable "prefix" {
+  description = "Prefix for resource names"
+  type        = string
+  default     = "gameserver"
+}
+
+# VPC and Network Configuration
 variable "vpc_cidr" {
-  description = "CIDR block for VPC"
+  description = "CIDR block for the VPC"
   type        = string
   default     = "10.0.0.0/16"
 }
@@ -27,17 +47,18 @@ variable "availability_zones" {
 variable "vpc_name" {
   description = "Name of the VPC"
   type        = string
-  default     = "game-server-vpc"
+  default     = "gameserver-vpc"
 }
 
+# Security Group Configuration
 variable "game_port" {
-  description = "Port for game server"
+  description = "Port for the game server"
   type        = number
-  default     = 25565
+  default     = 7777
 }
 
 variable "websocket_port" {
-  description = "Port for WebSocket server"
+  description = "Port for WebSocket connections"
   type        = number
   default     = 8080
 }
@@ -48,69 +69,80 @@ variable "ssh_cidr" {
   default     = "0.0.0.0/0"
 }
 
-variable "game_protocol" {
-  description = "Protocol for the game server (tcp or udp)"
-  type        = string
-  default     = "tcp"
-}
-
-variable "ami_id" {
-  description = "AMI ID for EC2 instance"
-  type        = string
-}
-
-variable "instance_type" {
-  description = "Instance type for EC2"
-  type        = string
-  default     = "t3.medium"
-}
-
 variable "security_group_name" {
   description = "Name of the security group"
   type        = string
-  default     = "game-server-sg"
+  default     = "gameserver-sg"
 }
 
-variable "user_pool_name" {
-  description = "Name of the Cognito user pool"
+variable "allowed_game_ips" {
+  description = "List of IPs allowed to connect to the game server"
+  type        = list(string)
+  default     = ["0.0.0.0/0"]
+}
+
+variable "game_protocol" {
+  description = "Protocol for the game server"
   type        = string
-  default     = "game-server-users"
+  default     = "udp"
+}
+
+# EC2 Instance Configuration
+variable "ami_id" {
+  description = "AMI ID for the EC2 instance"
+  type        = string
+  default     = "ami-0c7217cdde317cfec"  # Ubuntu 22.04 LTS
+}
+
+variable "instance_type" {
+  description = "Instance type for the EC2 instance"
+  type        = string
+  default     = "t3.micro"
+}
+
+# Cognito Configuration
+variable "user_pool_name" {
+  description = "Name of the Cognito User Pool"
+  type        = string
+  default     = "gameserver-users"
 }
 
 variable "app_client_name" {
-  description = "Name of the Cognito app client"
+  description = "Name of the Cognito User Pool Client"
   type        = string
-  default     = "game-server-client"
+  default     = "gameserver-client"
 }
 
 variable "admin_role_name" {
-  description = "Name of the admin role"
+  description = "Name of the Cognito Admin Role"
   type        = string
-  default     = "game-server-admin"
+  default     = "gameserver-admin"
 }
 
-variable "environment" {
-  description = "Environment name (e.g., dev, prod)"
-  type        = string
-  default     = "dev"
-}
-
-variable "project_name" {
-  description = "Name of the project"
-  type        = string
-  default     = "game-server"
-}
-
-variable "websocket_prefix" {
-  description = "Prefix for WebSocket resources"
-  type        = string
-  default     = "game-server-ws"
-}
-
+# API Gateway Configuration
 variable "websocket_stage_name" {
   description = "Name of the WebSocket API stage"
   type        = string
-  default     = "test"
+  default     = "prod"
+}
+
+# EventBridge Configuration
+variable "event_bus_name" {
+  description = "Name of the EventBridge event bus"
+  type        = string
+  default     = "gameserver-events"
+}
+
+variable "event_source" {
+  description = "Source for EventBridge events"
+  type        = string
+  default     = "gameserver.audio"
+}
+
+variable "event_detail_type" {
+  description = "Detail type for EventBridge events"
+  type        = string
+  default     = "AudioProcessing"
 }
 
 variable "log_retention_days" {
@@ -119,53 +151,42 @@ variable "log_retention_days" {
   default     = 30
 }
 
+# Storage Configuration
+variable "audio_bucket_name" {
+  description = "Name of the S3 bucket for audio storage"
+  type        = string
+  default     = "gameserver-audio-storage"
+}
+
+variable "connections_table" {
+  description = "Name of the DynamoDB table for WebSocket connections"
+  type        = string
+  default     = "gameserver-connections"
+}
+
+# Lambda Configuration
 variable "lambda_functions" {
-  description = "Map of Lambda function zip files"
-  type = object({
-    connect    = string
-    disconnect = string
-    message    = string
-  })
-  default = {
-    connect    = "lambda/connect.zip"
+  description = "Map of Lambda function names to their deployment package paths"
+  type        = map(string)
+  default     = {
+    process_audio = "lambda/process_audio.zip"
+    validate_audio = "lambda/validate_audio.zip"
+    connect = "lambda/connect.zip"
     disconnect = "lambda/disconnect.zip"
-    message    = "lambda/message.zip"
+    message = "lambda/message.zip"
+    audio = "lambda/audio.zip"
   }
 }
 
-# EventBridge variables
-variable "eventbridge_prefix" {
-  description = "Prefix for EventBridge resources"
-  type        = string
-  default     = "game-server"
+variable "lambda_environment_variables" {
+  description = "Additional environment variables for Lambda functions"
+  type        = map(string)
+  default     = {}
 }
 
-variable "eventbridge_bus_name" {
-  description = "Name of the EventBridge event bus"
-  type        = string
-  default     = "game-server-events"
-}
-
-variable "eventbridge_event_source" {
-  description = "Source name for EventBridge events"
-  type        = string
-  default     = "game-server.audio"
-}
-
-variable "eventbridge_event_detail_type" {
-  description = "Detail type for EventBridge events"
-  type        = string
-  default     = "SendAudioEvent"
-}
-
-variable "eventbridge_log_retention_days" {
-  description = "Number of days to retain EventBridge logs"
-  type        = number
-  default     = 30
-}
-
+# Feature Flags
 variable "enable_echo_mode" {
-  description = "Enable echo mode for testing (audio will be sent back to sender)"
-  type        = string
-  default     = "false"
+  description = "Enable echo mode for audio processing"
+  type        = bool
+  default     = true
 }

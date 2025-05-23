@@ -197,7 +197,8 @@ terraform.tfvars
 # AWS
 aws
 
-lambda
+# Lambda functions
+/lambda/
 
 # VS Code
 .vscode/

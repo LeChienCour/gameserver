@@ -1,4 +1,64 @@
+# Get current account ID
 data "aws_caller_identity" "current" {}
+
+# KMS Module
+module "kms" {
+  source = "./modules/kms"
+
+  prefix       = var.prefix
+  environment  = var.environment
+  project_name = var.project_name
+}
+
+# EventBridge Module
+module "eventbridge" {
+  source = "./modules/eventbridge"
+
+  prefix            = var.prefix
+  event_bus_name    = var.event_bus_name
+  event_source      = var.event_source
+  event_detail_type = var.event_detail_type
+  log_retention_days = var.log_retention_days
+}
+
+# IAM Module
+module "iam" {
+  source = "./modules/iam"
+
+  prefix            = var.prefix
+  audio_bucket_name = var.audio_bucket_name
+  kms_key_arn       = module.kms.key_arn
+  event_bus_arn     = module.eventbridge.event_bus_arn
+  connections_table = var.connections_table
+}
+
+# API Gateway Module
+module "api_gateway" {
+  source = "./modules/api_gateway"
+
+  prefix            = var.prefix
+  stage_name        = var.websocket_stage_name
+  cloudwatch_role_arn = module.iam.cloudwatch_role_arn
+}
+
+# Lambda Module
+module "lambda" {
+  source = "./modules/lambda"
+
+  prefix            = var.prefix
+  lambda_functions  = var.lambda_functions
+  audio_bucket_name = var.audio_bucket_name
+  kms_key_id        = module.kms.key_id
+  event_bus_arn     = module.eventbridge.event_bus_arn
+  connections_table = var.connections_table
+  enable_echo_mode  = var.enable_echo_mode
+  event_rule_arn    = module.eventbridge.audio_processing_rule_arn
+  lambda_role_arn   = module.iam.lambda_role_arn
+  event_bus_name    = module.eventbridge.event_bus_name
+  event_source      = var.event_source
+  api_gateway_id    = module.api_gateway.api_id
+  api_gateway_execution_arn = module.api_gateway.execution_arn
+}
 
 terraform {
   backend "s3" {
@@ -62,17 +122,6 @@ module "cognito" {
   admin_role_name = var.admin_role_name
 }
 
-# EventBridge for event handling
-module "eventbridge" {
-  source = "./modules/eventbridge"
-  
-  prefix         = var.eventbridge_prefix
-  event_bus_name = var.eventbridge_bus_name
-  event_source   = var.eventbridge_event_source
-  event_detail_type = var.eventbridge_event_detail_type
-  log_retention_days = var.eventbridge_log_retention_days
-}
-
 # DynamoDB table for WebSocket connections
 resource "aws_dynamodb_table" "websocket_connections" {
   name           = "${var.project_name}-connections"
@@ -109,72 +158,12 @@ data "archive_file" "message_function" {
   output_path = "${path.module}/lambda/message.zip"
 }
 
-# WebSocket API Gateway
-module "websocket" {
-  source = "./modules/websocket"
-  
-  prefix             = var.websocket_prefix
-  stage_name         = var.websocket_stage_name
-  environment        = var.environment
-  project_name       = var.project_name
-  log_retention_days = var.log_retention_days
-  event_bus_arn      = module.eventbridge.event_bus_arn
-  event_bus_name     = module.eventbridge.event_bus_name
-  event_source       = var.eventbridge_event_source
-  connections_table  = aws_dynamodb_table.websocket_connections.name
-  audio_bucket_arn   = aws_s3_bucket.audio_storage.arn
-  
-  # Lambda functions for WebSocket handling
-  lambda_functions = {
-    connect    = data.archive_file.connect_function.output_path
-    disconnect = data.archive_file.disconnect_function.output_path
-    message    = data.archive_file.message_function.output_path
-    audio      = data.archive_file.process_audio_function.output_path
-  }
-
-  # Additional IAM permissions
-  lambda_environment_variables = {
-    CONNECTIONS_TABLE = aws_dynamodb_table.websocket_connections.name
-    EVENT_SOURCE     = var.eventbridge_event_source
-    EVENT_DETAIL_TYPE = var.eventbridge_event_detail_type
-    EVENT_BUS_NAME   = module.eventbridge.event_bus_name
-    AUDIO_BUCKET     = aws_s3_bucket.audio_storage.id
-  }
-
-  depends_on = [aws_dynamodb_table.websocket_connections, aws_s3_bucket.audio_storage]
+data "archive_file" "audio_function" {
+  type        = "zip"
+  source_dir  = "${path.module}/functions/audio"
+  output_path = "${path.module}/lambda/audio.zip"
 }
 
-# Create S3 bucket for audio storage
-resource "aws_s3_bucket" "audio_storage" {
-  bucket = "${var.project_name}-audio-storage-${data.aws_caller_identity.current.account_id}"
-
-  tags = {
-    Name        = "${var.project_name}-audio-storage"
-    Environment = var.environment
-  }
-}
-
-# Audio Processing Module
-module "audio_processing" {
-  source = "./modules/audio_processing"
-  
-  environment        = var.environment
-  project_name       = var.project_name
-  prefix             = "${var.project_name}-audio"
-  audio_bucket_name  = aws_s3_bucket.audio_storage.id
-  event_bus_name     = module.eventbridge.event_bus_name
-  event_bus_arn      = module.eventbridge.event_bus_arn
-  event_source       = var.eventbridge_event_source
-  connections_table  = aws_dynamodb_table.websocket_connections.name
-  enable_echo_mode   = var.enable_echo_mode  # This will be false by default
-  
-  lambda_functions = {
-    process_audio  = "${path.module}/lambda/process_audio.zip"
-    validate_audio = "${path.module}/lambda/validate_audio.zip"
-  }
-}
-
-# Create Lambda deployment packages for audio processing
 data "archive_file" "process_audio_function" {
   type        = "zip"
   source_dir  = "${path.module}/functions/process_audio"
@@ -187,16 +176,12 @@ data "archive_file" "validate_audio_function" {
   output_path = "${path.module}/lambda/validate_audio.zip"
 }
 
-# SSM Parameters for Configuration
-module "ssm" {
-  source = "./modules/ssm"
-  
-  # Cognito Configuration
-  user_pool_id        = module.cognito.user_pool_id
-  user_pool_client_id = module.cognito.user_pool_client_id
-  
-  # WebSocket Configuration
-  websocket_api_id    = module.websocket.websocket_api_id
-  websocket_stage_url = module.websocket.websocket_stage_url
-  websocket_api_key   = module.websocket.api_key
+# Create S3 bucket for audio storage
+resource "aws_s3_bucket" "audio_storage" {
+  bucket = "${var.project_name}-audio-storage-${data.aws_caller_identity.current.account_id}"
+
+  tags = {
+    Name        = "${var.project_name}-audio-storage"
+    Environment = var.environment
+  }
 }
