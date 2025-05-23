@@ -76,6 +76,10 @@ data "template_file" "user_data" {
     neoforge_version = var.neoforge_version
     server_memory = var.server_memory
     java_parameters = var.java_parameters
+    LOG_DIR = "/opt/minecraft/logs"
+    LATEST_LOG = "/opt/minecraft/logs/latest.log"
+    DEBUG_LOG = "/opt/minecraft/logs/debug.log"
+    ERROR_LOG = "/opt/minecraft/logs/errors.log"
   }
 }
 
