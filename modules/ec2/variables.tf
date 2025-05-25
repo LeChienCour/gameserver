@@ -1,24 +1,84 @@
 variable "ami_id" {
-  description = "AMI ID for the game server"
+  description = "AMI ID for EC2 instance"
   type        = string
-  default = "ami-0e3faa5e960844571" // Amazon Linux 2 AMI (HVM) 64-bit (Arm)
 }
 
 variable "instance_type" {
-  description = "EC2 instance type"
+  description = "Instance type for EC2"
   type        = string
+  default     = "t3.medium"
 }
 
 variable "subnet_id" {
-  description = "ID of the subnet for the instance"
+  description = "Subnet ID for EC2 instance"
   type        = string
 }
 
 variable "security_group_id" {
-  description = "ID of the security group for the instance"
+  description = "Security group ID for EC2 instance"
   type        = string
 }
+
 variable "game_port" {
-  description = "Port for the game server"
-  type = number
+  description = "Port for game server"
+  type        = number
+  default     = 25565
+}
+
+variable "websocket_port" {
+  description = "Port for WebSocket server"
+  type        = number
+  default     = 8080
+}
+
+variable "user_pool_id" {
+  description = "Cognito User Pool ID"
+  type        = string
+}
+
+variable "user_pool_client_id" {
+  description = "Cognito User Pool Client ID"
+  type        = string
+}
+
+variable "environment" {
+  description = "Environment name (e.g., dev, prod)"
+  type        = string
+  default     = "dev"
+}
+
+variable "minecraft_version" {
+  description = "Version of Minecraft to install"
+  type        = string
+  default     = "1.21.1"
+}
+
+variable "neoforge_version" {
+  description = "Version of NeoForge to install"
+  type        = string
+  default     = "1.21.1"
+}
+
+variable "server_memory" {
+  description = "Amount of memory to allocate to the Minecraft server (in GB)"
+  type        = number
+  default     = 4
+}
+
+variable "root_volume_size" {
+  description = "Size of the root volume in GB"
+  type        = number
+  default     = 30
+}
+
+variable "log_retention_days" {
+  description = "Number of days to retain CloudWatch logs"
+  type        = number
+  default     = 30
+}
+
+variable "java_parameters" {
+  description = "Additional Java parameters for the Minecraft server"
+  type        = string
+  default     = ""
 }

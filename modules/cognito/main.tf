@@ -12,9 +12,13 @@ resource "aws_cognito_user_pool" "pool" {
   }
 
   verification_message_template {
-  email_message = "Your verification code is {####}"
-  email_subject = "Your verification code"
+    email_message = "Your verification code is {####}"
+    email_subject = "Your verification code"
   }
+}
+
+resource "aws_cognito_user_pool" "main" {
+  name = var.user_pool_name
 }
 
 resource "aws_cognito_user_pool_client" "client" {
