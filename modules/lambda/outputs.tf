@@ -26,7 +26,6 @@ output "lambda_functions" {
     connect    = aws_lambda_function.connect.arn
     disconnect = aws_lambda_function.disconnect.arn
     message    = aws_lambda_function.message.arn
-    audio      = aws_lambda_function.audio.arn
   }
 }
 
@@ -38,6 +37,5 @@ output "lambda_function_names" {
     connect    = aws_lambda_function.connect.function_name
     disconnect = aws_lambda_function.disconnect.function_name
     message    = aws_lambda_function.message.function_name
-    audio      = aws_lambda_function.audio.function_name
   }
 } 

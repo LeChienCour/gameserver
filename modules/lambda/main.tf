@@ -126,32 +126,6 @@ resource "aws_lambda_function" "message" {
   }
 }
 
-resource "aws_lambda_function" "audio" {
-  filename         = var.lambda_functions.audio
-  function_name    = "${var.prefix}-audio"
-  role            = var.lambda_role_arn
-  handler         = "lambda_function.lambda_handler"
-  runtime         = "python3.10"
-  timeout         = var.websocket_timeout
-  memory_size     = var.websocket_memory
-
-  environment {
-    variables = merge(
-      {
-        CONNECTIONS_TABLE = var.connections_table
-        EVENT_BUS_ARN    = var.event_bus_arn
-      },
-      var.lambda_environment_variables
-    )
-  }
-
-  tags = {
-    Name        = "${var.prefix}-audio"
-    Environment = var.environment
-    Service     = "WebSocket"
-  }
-}
-
 # Lambda Permissions for EventBridge Integration
 resource "aws_lambda_permission" "process_audio" {
   statement_id  = "AllowEventBridgeInvoke"
@@ -190,14 +164,6 @@ resource "aws_lambda_permission" "message" {
   statement_id  = "AllowAPIGatewayInvoke"
   action        = "lambda:InvokeFunction"
   function_name = aws_lambda_function.message.function_name
-  principal     = "apigateway.amazonaws.com"
-  source_arn    = "${var.api_gateway_execution_arn}/*/*"
-}
-
-resource "aws_lambda_permission" "audio" {
-  statement_id  = "AllowAPIGatewayInvoke"
-  action        = "lambda:InvokeFunction"
-  function_name = aws_lambda_function.audio.function_name
   principal     = "apigateway.amazonaws.com"
   source_arn    = "${var.api_gateway_execution_arn}/*/*"
 } 

@@ -1,22 +1,10 @@
 # variables.tf
 
-# AWS Region and Environment Configuration
-variable "region" {
-  description = "AWS region"
-  type        = string
-  default     = "us-east-1"
-}
-
+# Common Configuration
 variable "environment" {
   description = "Environment name"
   type        = string
   default     = "dev"
-}
-
-variable "project_name" {
-  description = "Name of the project"
-  type        = string
-  default     = "gameserver"
 }
 
 variable "prefix" {
@@ -25,66 +13,48 @@ variable "prefix" {
   default     = "gameserver"
 }
 
-# VPC and Network Configuration
-variable "vpc_cidr" {
-  description = "CIDR block for the VPC"
+variable "project_name" {
+  description = "Name of the project"
   type        = string
-  default     = "10.0.0.0/16"
+  default     = "gameserver"
 }
 
-variable "public_subnets_cidr" {
-  description = "CIDR blocks for public subnets"
-  type        = list(string)
-  default     = ["10.0.1.0/24", "10.0.2.0/24"]
-}
-
-variable "availability_zones" {
-  description = "Availability zones"
-  type        = list(string)
-  default     = ["us-east-1a", "us-east-1b"]
-}
-
-variable "vpc_name" {
-  description = "Name of the VPC"
+variable "region" {
+  description = "AWS region"
   type        = string
-  default     = "gameserver-vpc"
+  default     = "us-east-1"
 }
 
-# Security Group Configuration
-variable "game_port" {
-  description = "Port for the game server"
-  type        = number
-  default     = 7777
-}
-
-variable "websocket_port" {
-  description = "Port for WebSocket connections"
-  type        = number
-  default     = 8080
-}
-
-variable "ssh_cidr" {
-  description = "CIDR block for SSH access"
+# API Gateway Configuration
+variable "websocket_prefix" {
+  description = "Prefix for WebSocket resources"
   type        = string
-  default     = "0.0.0.0/0"
+  default     = "gameserver"
 }
 
-variable "security_group_name" {
-  description = "Name of the security group"
+variable "websocket_stage_name" {
+  description = "Name of the WebSocket API stage"
   type        = string
-  default     = "gameserver-sg"
+  default     = "dev"
 }
 
-variable "allowed_game_ips" {
-  description = "List of IPs allowed to connect to the game server"
-  type        = list(string)
-  default     = ["0.0.0.0/0"]
-}
-
-variable "game_protocol" {
-  description = "Protocol for the game server"
+# Cognito Configuration
+variable "admin_role_name" {
+  description = "Name of the Cognito Admin Role"
   type        = string
-  default     = "udp"
+  default     = "gameserver-admin"
+}
+
+variable "app_client_name" {
+  description = "Name of the Cognito User Pool Client"
+  type        = string
+  default     = "gameserver-client"
+}
+
+variable "user_pool_name" {
+  description = "Name of the Cognito User Pool"
+  type        = string
+  default     = "gameserver-users"
 }
 
 # EC2 Instance Configuration
@@ -100,43 +70,11 @@ variable "instance_type" {
   default     = "t3.micro"
 }
 
-# Cognito Configuration
-variable "user_pool_name" {
-  description = "Name of the Cognito User Pool"
-  type        = string
-  default     = "gameserver-users"
-}
-
-variable "app_client_name" {
-  description = "Name of the Cognito User Pool Client"
-  type        = string
-  default     = "gameserver-client"
-}
-
-variable "admin_role_name" {
-  description = "Name of the Cognito Admin Role"
-  type        = string
-  default     = "gameserver-admin"
-}
-
-# API Gateway Configuration
-variable "websocket_stage_name" {
-  description = "Name of the WebSocket API stage"
-  type        = string
-  default     = "prod"
-}
-
 # EventBridge Configuration
 variable "event_bus_name" {
   description = "Name of the EventBridge event bus"
   type        = string
   default     = "gameserver-events"
-}
-
-variable "event_source" {
-  description = "Source for EventBridge events"
-  type        = string
-  default     = "gameserver.audio"
 }
 
 variable "event_detail_type" {
@@ -145,10 +83,79 @@ variable "event_detail_type" {
   default     = "AudioProcessing"
 }
 
+variable "event_source" {
+  description = "Source for EventBridge events"
+  type        = string
+  default     = "gameserver.audio"
+}
+
 variable "log_retention_days" {
   description = "Number of days to retain CloudWatch logs"
   type        = number
   default     = 30
+}
+
+# Feature Flags
+variable "enable_echo_mode" {
+  description = "Enable echo mode for audio processing"
+  type        = bool
+  default     = true
+}
+
+# Lambda Configuration
+variable "lambda_environment_variables" {
+  description = "Additional environment variables for Lambda functions"
+  type        = map(string)
+  default     = {}
+}
+
+variable "lambda_functions" {
+  description = "Map of Lambda function names to their deployment package paths"
+  type        = map(string)
+  default     = {
+    connect = "lambda/connect.zip"
+    disconnect = "lambda/disconnect.zip"
+    message = "lambda/message.zip"
+    process_audio = "lambda/process_audio.zip"
+    validate_audio = "lambda/validate_audio.zip"
+  }
+}
+
+# Security Group Configuration
+variable "allowed_game_ips" {
+  description = "List of IPs allowed to connect to the game server"
+  type        = list(string)
+  default     = ["0.0.0.0/0"]
+}
+
+variable "game_port" {
+  description = "Port for the game server"
+  type        = number
+  default     = 7777
+}
+
+variable "game_protocol" {
+  description = "Protocol for the game server"
+  type        = string
+  default     = "udp"
+}
+
+variable "security_group_name" {
+  description = "Name of the security group"
+  type        = string
+  default     = "gameserver-sg"
+}
+
+variable "ssh_cidr" {
+  description = "CIDR block for SSH access"
+  type        = string
+  default     = "0.0.0.0/0"
+}
+
+variable "websocket_port" {
+  description = "Port for WebSocket connections"
+  type        = number
+  default     = 8080
 }
 
 # Storage Configuration
@@ -164,29 +171,27 @@ variable "connections_table" {
   default     = "gameserver-connections"
 }
 
-# Lambda Configuration
-variable "lambda_functions" {
-  description = "Map of Lambda function names to their deployment package paths"
-  type        = map(string)
-  default     = {
-    process_audio = "lambda/process_audio.zip"
-    validate_audio = "lambda/validate_audio.zip"
-    connect = "lambda/connect.zip"
-    disconnect = "lambda/disconnect.zip"
-    message = "lambda/message.zip"
-    audio = "lambda/audio.zip"
-  }
+# VPC and Network Configuration
+variable "availability_zones" {
+  description = "Availability zones"
+  type        = list(string)
+  default     = ["us-east-1a", "us-east-1b"]
 }
 
-variable "lambda_environment_variables" {
-  description = "Additional environment variables for Lambda functions"
-  type        = map(string)
-  default     = {}
+variable "public_subnets_cidr" {
+  description = "CIDR blocks for public subnets"
+  type        = list(string)
+  default     = ["10.0.1.0/24", "10.0.2.0/24"]
 }
 
-# Feature Flags
-variable "enable_echo_mode" {
-  description = "Enable echo mode for audio processing"
-  type        = bool
-  default     = true
+variable "vpc_cidr" {
+  description = "CIDR block for the VPC"
+  type        = string
+  default     = "10.0.0.0/16"
+}
+
+variable "vpc_name" {
+  description = "Name of the VPC"
+  type        = string
+  default     = "gameserver-vpc"
 }

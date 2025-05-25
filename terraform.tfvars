@@ -45,6 +45,9 @@ connections_table = "voice-chat-connections"
 lambda_functions = {
   process_audio  = "lambda/process_audio.zip"
   validate_audio = "lambda/validate_audio.zip"
+  connect        = "lambda/connect.zip"
+  disconnect     = "lambda/disconnect.zip"
+  message        = "lambda/message.zip"
 }
 
 # Feature Flags
