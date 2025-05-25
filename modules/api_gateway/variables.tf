@@ -42,4 +42,20 @@ variable "quota_limit" {
   description = "Maximum number of requests per month"
   type        = number
   default     = 1000000
+}
+
+# Lambda ARNs for WebSocket integrations
+variable "lambda_connect_arn" {
+  description = "ARN of the connect Lambda function"
+  type        = string
+}
+
+variable "lambda_disconnect_arn" {
+  description = "ARN of the disconnect Lambda function"
+  type        = string
+}
+
+variable "lambda_message_arn" {
+  description = "ARN of the message Lambda function"
+  type        = string
 } 

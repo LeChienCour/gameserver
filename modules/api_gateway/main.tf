@@ -111,4 +111,53 @@ resource "aws_apigatewayv2_stage" "websocket" {
 # API Gateway Account Settings for CloudWatch Integration
 resource "aws_api_gateway_account" "websocket" {
   cloudwatch_role_arn = var.cloudwatch_role_arn
+}
+
+# WebSocket Routes and Integrations for API Gateway
+# These resources define the routing and integration of WebSocket messages with Lambda functions
+
+# WebSocket Routes
+resource "aws_apigatewayv2_route" "connect" {
+  api_id    = aws_apigatewayv2_api.websocket.id
+  route_key = "$connect"
+  target    = "integrations/${aws_apigatewayv2_integration.connect.id}"
+}
+
+resource "aws_apigatewayv2_route" "disconnect" {
+  api_id    = aws_apigatewayv2_api.websocket.id
+  route_key = "$disconnect"
+  target    = "integrations/${aws_apigatewayv2_integration.disconnect.id}"
+}
+
+# Route for handling sendaudio action
+resource "aws_apigatewayv2_route" "sendaudio" {
+  api_id    = aws_apigatewayv2_api.websocket.id
+  route_key = "sendaudio"
+  target    = "integrations/${aws_apigatewayv2_integration.message.id}"
+}
+
+# Default route for any other action
+resource "aws_apigatewayv2_route" "default" {
+  api_id    = aws_apigatewayv2_api.websocket.id
+  route_key = "$default"
+  target    = "integrations/${aws_apigatewayv2_integration.message.id}"
+}
+
+# WebSocket Integrations
+resource "aws_apigatewayv2_integration" "connect" {
+  api_id           = aws_apigatewayv2_api.websocket.id
+  integration_type = "AWS_PROXY"
+  integration_uri  = var.lambda_connect_arn
+}
+
+resource "aws_apigatewayv2_integration" "disconnect" {
+  api_id           = aws_apigatewayv2_api.websocket.id
+  integration_type = "AWS_PROXY"
+  integration_uri  = var.lambda_disconnect_arn
+}
+
+resource "aws_apigatewayv2_integration" "message" {
+  api_id           = aws_apigatewayv2_api.websocket.id
+  integration_type = "AWS_PROXY"
+  integration_uri  = var.lambda_message_arn
 } 

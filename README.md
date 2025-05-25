@@ -10,13 +10,18 @@ The infrastructure consists of several key components:
    - Handles real-time communication
    - Supports audio streaming
    - API key authentication
-   - Routes: connect, disconnect, sendaudio, audio
+   - Routes:
+     - `$connect`: Handles new WebSocket connections
+     - `$disconnect`: Handles connection termination
+     - `sendaudio`: Processes incoming audio data
+     - `$default`: Handles unmatched routes
 
 2. **Lambda Functions**
-   - Connection management (connect/disconnect)
-   - Message handling
-   - Audio processing
-   - Audio validation and broadcasting
+   - `connect`: Manages new WebSocket connections and stores connection data
+   - `disconnect`: Cleans up terminated connections
+   - `message`: Handles WebSocket messages and audio events
+   - `process_audio`: Processes and stores audio in S3
+   - `validate_audio`: Validates and broadcasts audio to connected clients
 
 3. **Storage**
    - DynamoDB for WebSocket connections
@@ -33,16 +38,33 @@ The infrastructure consists of several key components:
    - IAM roles and policies
    - KMS encryption for audio data
 
+## Connection Flow
+
+1. **Initial Connection (`$connect` route)**
+   - Client connects to WebSocket API with API key
+   - `connect` Lambda function:
+     - Generates unique connection ID
+     - Stores connection details in DynamoDB:
+       ```json
+       {
+         "connectionId": "unique-id",
+         "connectedAt": "ISO8601_timestamp",
+         "domain": "api-domain",
+         "stage": "stage-name"
+       }
+       ```
+     - Returns 200 status on success
+
+2. **Disconnection (`$disconnect` route)**
+   - Triggered when client disconnects
+   - `disconnect` Lambda function:
+     - Removes connection record from DynamoDB
+     - Cleans up any associated resources
+     - Returns 200 status on success
+
 ## Audio Flow
 
-The voice chat system follows this flow:
-
-1. **Client Connection**
-   - Client connects to WebSocket API with API key
-   - Connection ID stored in DynamoDB
-   - Uses `$connect` route handled by `connect` Lambda
-
-2. **Audio Transmission**
+1. **Audio Transmission**
    - Client captures audio and sends via WebSocket
    - Audio data is base64 encoded
    - Uses 'sendaudio' route
@@ -55,7 +77,7 @@ The voice chat system follows this flow:
      }
      ```
 
-3. **Processing Pipeline**
+2. **Processing Pipeline**
    ```
    Client -> WebSocket API -> Message Lambda -> EventBridge -> Process Audio Lambda -> EventBridge -> Validate Audio Lambda -> Broadcast to Listeners
    ```
@@ -89,28 +111,6 @@ The voice chat system follows this flow:
       - Triggered by EventBridge rule on PENDING status
       - Stores audio in S3 with path: `audio/{author}/{timestamp}.pcm`
       - Forwards event to validation with S3 reference
-      - Event format:
-        ```json
-        {
-          "Source": "voice-chat",
-          "DetailType": "SendAudioEvent",
-          "Detail": {
-            "status": "PENDING",
-            "message": {
-              "action": "sendaudio",
-              "data": "base64_encoded_audio",
-              "author": "username"
-            },
-            "websocket_context": {
-              "domain_name": "api-domain",
-              "stage": "stage-name",
-              "connection_id": "connection-id"
-            },
-            "s3_key": "audio/{author}/{timestamp}.pcm",
-            "timestamp": "ISO8601_timestamp"
-          }
-        }
-        ```
 
    c. **Audio Validation and Broadcasting (Validate Audio Lambda)**
       - Validates audio format and size
@@ -129,17 +129,59 @@ The voice chat system follows this flow:
         }
         ```
 
-4. **Error Handling**
-   - Connection errors: Remove stale connections from DynamoDB
-   - S3 errors: Return 500 error, log failure
-   - EventBridge errors: Log and return appropriate status
-   - Broadcasting errors: Log and cleanup stale connections
-   - Audio validation errors: Return 400 error with reason
+## Error Handling
 
-5. **Testing Mode**
-   - Echo mode available for testing (set via `enable_echo_mode`)
-   - When enabled, audio is sent back to sender
-   - Useful for testing audio capture and playback
+1. **Connection Errors**
+   - Invalid API key: 403 Forbidden
+   - Connection failure: 500 Internal Server Error
+   - Stale connections: Automatically removed from DynamoDB
+
+2. **Audio Processing Errors**
+   - Invalid audio format: 400 Bad Request
+   - Processing failure: 500 Internal Server Error
+   - Storage failure: 500 Internal Server Error
+
+3. **Broadcasting Errors**
+   - Stale connections: Removed during broadcast attempts
+   - Broadcast failure: Logged and continues to next recipient
+
+## Testing Mode
+
+- Echo mode available (set via `enable_echo_mode`)
+- When enabled, audio is sent back to sender
+- Useful for testing audio capture and playback
+
+## Environment Variables
+
+1. **Lambda Functions**
+   - `CONNECTIONS_TABLE`: DynamoDB table for WebSocket connections
+   - `AUDIO_BUCKET`: S3 bucket for audio storage
+   - `EVENT_BUS_NAME`: EventBridge bus name
+   - `EVENT_SOURCE`: Source name for events
+   - `KMS_KEY_ID`: KMS key for encryption
+   - `ECHO_MODE`: Enable/disable echo testing mode
+
+2. **API Gateway**
+   - Stage variables and settings defined in Terraform
+   - Logging and monitoring configurations
+
+## Infrastructure Management
+
+1. **Deployment**
+   - Uses Terraform for infrastructure as code
+   - Modular design with separate concerns
+   - Automated resource creation and configuration
+
+2. **Monitoring**
+   - CloudWatch logs for all components
+   - Metrics and alarms for critical paths
+   - Error tracking and reporting
+
+3. **Security**
+   - IAM roles with least privilege
+   - Encryption in transit and at rest
+   - API key management
+   - User authentication via Cognito
 
 ## Detailed Information Flow
 
@@ -436,42 +478,6 @@ The voice chat system follows this flow:
 - Event rules for audio processing
 - CloudWatch logging
 - Error handling
-
-## Environment Variables
-
-Key environment variables used in the Lambda functions:
-- CONNECTIONS_TABLE: DynamoDB table name
-- AUDIO_BUCKET: S3 bucket name
-- EVENT_BUS_NAME: EventBridge bus name
-- EVENT_SOURCE: Event source identifier
-- EVENT_DETAIL_TYPE: Event detail type
-
-### Message Lambda
-- CONNECTIONS_TABLE: DynamoDB table for connections
-- EVENT_SOURCE: Source name for EventBridge events
-- EVENT_BUS_NAME: Name of the EventBridge bus
-
-### Process Audio Lambda
-- AUDIO_BUCKET: S3 bucket for audio storage
-- KMS_KEY_ID: KMS key for audio encryption
-- EVENT_BUS_ARN: EventBridge bus ARN
-- CONNECTIONS_TABLE: DynamoDB table for connections
-
-### Validate Audio Lambda
-- CONNECTIONS_TABLE: DynamoDB table for connections
-- ECHO_MODE: Enable/disable echo testing mode
-
-## Security
-
-1. **Authentication**
-   - Cognito user pools
-   - API key required for WebSocket
-   - IAM roles per service
-
-2. **Encryption**
-   - KMS for audio data
-   - HTTPS for all API communication
-   - Secure parameter storage in SSM
 
 ## Monitoring
 
