@@ -21,6 +21,16 @@ output "websocket_stage_url" {
   value       = module.api_gateway.api_endpoint
 }
 
+output "websocket_execution_arn" {
+  description = "The execution ARN of the WebSocket API"
+  value       = module.api_gateway.execution_arn
+}
+
+output "websocket_route_ids" {
+  description = "Map of WebSocket route IDs"
+  value       = module.api_gateway.route_ids
+}
+
 # Cognito Information
 output "cognito_admin_role_arn" {
   description = "The ARN of the Cognito Admin Role"
@@ -79,17 +89,12 @@ output "game_server_security_group_id" {
   value       = module.security_groups.game_server_sg_id
 }
 
+output "game_server_instance_role_arn" {
+  description = "ARN of the IAM role attached to the game server instance"
+  value       = module.ec2_game_server.instance_role_arn
+}
+
 # EventBridge Information
-output "audio_processing_rule_arn" {
-  description = "The ARN of the EventBridge rule for audio processing"
-  value       = module.eventbridge.audio_processing_rule_arn
-}
-
-output "audio_validation_rule_arn" {
-  description = "The ARN of the EventBridge rule for audio validation"
-  value       = module.eventbridge.audio_validation_rule_arn
-}
-
 output "event_bus_arn" {
   description = "The ARN of the EventBridge event bus"
   value       = module.eventbridge.event_bus_arn
@@ -98,6 +103,24 @@ output "event_bus_arn" {
 output "event_bus_name" {
   description = "The name of the EventBridge event bus"
   value       = module.eventbridge.event_bus_name
+}
+
+output "event_rules" {
+  description = "EventBridge rules information"
+  value = {
+    audio_processing = {
+      arn  = module.eventbridge.audio_processing_rule_arn
+      name = module.eventbridge.event_rule_name
+    }
+    audio_validation = {
+      arn = module.eventbridge.audio_validation_rule_arn
+    }
+  }
+}
+
+output "event_log_group_name" {
+  description = "Name of the EventBridge CloudWatch log group"
+  value       = module.eventbridge.log_group_name
 }
 
 # IAM Information
@@ -127,15 +150,67 @@ output "kms_key_id" {
   value       = module.kms.key_id
 }
 
-# Lambda Information
-output "process_audio_function_arn" {
-  description = "The ARN of the process audio Lambda function"
-  value       = module.lambda.process_audio_function_arn
+output "kms_alias_arn" {
+  description = "The ARN of the KMS key alias"
+  value       = module.kms.alias_arn
 }
 
-output "validate_audio_function_arn" {
-  description = "The ARN of the validate audio Lambda function"
-  value       = module.lambda.validate_audio_function_arn
+# Lambda Information
+output "lambda_functions" {
+  description = "Map of Lambda function information"
+  value = {
+    process_audio = {
+      arn  = module.lambda.process_audio_function_arn
+      name = module.lambda.lambda_function_names["process_audio"]
+    }
+    validate_audio = {
+      arn  = module.lambda.validate_audio_function_arn
+      name = module.lambda.lambda_function_names["validate_audio"]
+    }
+    connect = {
+      name = module.lambda.lambda_function_names["connect"]
+    }
+    disconnect = {
+      name = module.lambda.lambda_function_names["disconnect"]
+    }
+    message = {
+      name = module.lambda.lambda_function_names["message"]
+    }
+  }
+}
+
+# SSM Information
+output "ssm_cognito_parameters" {
+  description = "SSM Parameters for Cognito"
+  value = {
+    user_pool_id = {
+      arn  = module.ssm.user_pool_id_parameter_arn
+      name = module.ssm.user_pool_id_parameter_name
+    }
+    user_pool_client_id = {
+      arn  = module.ssm.user_pool_client_id_parameter_arn
+      name = module.ssm.user_pool_client_id_parameter_name
+    }
+  }
+}
+
+output "ssm_websocket_parameters" {
+  description = "SSM Parameters for WebSocket"
+  value = {
+    api_id = {
+      arn  = module.ssm.websocket_api_id_parameter_arn
+      name = module.ssm.websocket_api_id_parameter_name
+    }
+    stage_url = {
+      arn  = module.ssm.websocket_stage_url_parameter_arn
+      name = module.ssm.websocket_stage_url_parameter_name
+    }
+    api_key = {
+      arn  = module.ssm.websocket_api_key_parameter_arn
+      name = module.ssm.websocket_api_key_parameter_name
+    }
+  }
+  sensitive = true
 }
 
 # Storage Information

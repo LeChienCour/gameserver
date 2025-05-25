@@ -185,3 +185,14 @@ module "vpc" {
   availability_zones  = var.availability_zones
   vpc_name            = var.vpc_name
 }
+
+# SSM Module
+module "ssm" {
+  source = "./modules/ssm"
+
+  user_pool_id       = module.cognito.user_pool_id
+  user_pool_client_id = module.cognito.user_pool_client_id
+  websocket_api_id   = module.api_gateway.api_id
+  websocket_stage_url = module.api_gateway.api_endpoint
+  websocket_api_key  = module.api_gateway.api_key
+}
