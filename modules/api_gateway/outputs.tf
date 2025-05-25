@@ -5,7 +5,7 @@ output "api_id" {
 
 output "api_endpoint" {
   description = "WebSocket API endpoint"
-  value       = aws_apigatewayv2_api.websocket.api_endpoint
+  value       = "${aws_apigatewayv2_api.websocket.api_endpoint}/${aws_apigatewayv2_stage.websocket.name}"
 }
 
 output "execution_arn" {

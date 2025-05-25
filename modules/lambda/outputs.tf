@@ -8,6 +8,21 @@ output "validate_audio_function_arn" {
   value       = aws_lambda_function.validate_audio.arn
 }
 
+output "connect_function_arn" {
+  description = "ARN of the connect Lambda function"
+  value       = aws_lambda_function.connect.arn
+}
+
+output "disconnect_function_arn" {
+  description = "ARN of the disconnect Lambda function"
+  value       = aws_lambda_function.disconnect.arn
+}
+
+output "message_function_arn" {
+  description = "ARN of the message Lambda function"
+  value       = aws_lambda_function.message.arn
+}
+
 output "process_audio_function_name" {
   description = "Name of the process audio Lambda function"
   value       = aws_lambda_function.process_audio.function_name

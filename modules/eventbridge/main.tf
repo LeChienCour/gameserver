@@ -42,16 +42,20 @@ resource "aws_cloudwatch_event_rule" "audio_processing_rule" {
     detail-type = ["SendAudioEvent"]
     detail = {
       status = ["PENDING"]
-      websocket_context = {
-        domain_name = [{ "exists": true }]
-        stage = [{ "exists": true }]
-        connection_id = [{ "exists": true }]
-      }
       message = {
+        action = ["sendaudio"]
         data = [{ "exists": true }]
       }
     }
   })
+}
+
+# Target for audio processing rule
+resource "aws_cloudwatch_event_target" "audio_processing_target" {
+  rule           = aws_cloudwatch_event_rule.audio_processing_rule.name
+  event_bus_name = aws_cloudwatch_event_bus.game_event_bus.name
+  target_id      = "${var.prefix}-process-audio-target"
+  arn            = var.process_audio_function_arn
 }
 
 resource "aws_cloudwatch_event_rule" "audio_validation_rule" {
@@ -63,7 +67,8 @@ resource "aws_cloudwatch_event_rule" "audio_validation_rule" {
     source      = [var.event_source]
     detail-type = ["SendAudioEvent"]
     detail = {
-      status = ["PENDING"]
+      status = ["PROCESSED"]
+      s3_key = [{ "exists": true }]
       websocket_context = {
         domain_name = [{ "exists": true }]
         stage = [{ "exists": true }]
@@ -75,4 +80,12 @@ resource "aws_cloudwatch_event_rule" "audio_validation_rule" {
       }
     }
   })
+}
+
+# Target for audio validation rule
+resource "aws_cloudwatch_event_target" "audio_validation_target" {
+  rule           = aws_cloudwatch_event_rule.audio_validation_rule.name
+  event_bus_name = aws_cloudwatch_event_bus.game_event_bus.name
+  target_id      = "${var.prefix}-validate-audio-target"
+  arn            = var.validate_audio_function_arn
 } 

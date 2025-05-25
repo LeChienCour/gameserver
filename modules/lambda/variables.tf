@@ -14,45 +14,8 @@ variable "lambda_functions" {
   type        = map(string)
 }
 
-variable "lambda_environment_variables" {
-  description = "Additional environment variables for Lambda functions"
-  type        = map(string)
-  default     = {}
-}
-
 variable "audio_bucket_name" {
   description = "Name of the S3 bucket for audio storage"
-  type        = string
-}
-
-variable "kms_key_id" {
-  description = "ID of the KMS key for encryption"
-  type        = string
-}
-
-variable "event_bus_arn" {
-  description = "ARN of the EventBridge event bus"
-  type        = string
-}
-
-variable "connections_table" {
-  description = "Name of the DynamoDB table for WebSocket connections"
-  type        = string
-}
-
-variable "enable_echo_mode" {
-  description = "Enable echo mode for audio processing"
-  type        = bool
-  default     = false
-}
-
-variable "event_rule_arn" {
-  description = "ARN of the EventBridge rule"
-  type        = string
-}
-
-variable "lambda_role_arn" {
-  description = "ARN of the IAM role for Lambda functions"
   type        = string
 }
 
@@ -63,6 +26,16 @@ variable "event_bus_name" {
 
 variable "event_source" {
   description = "Source for EventBridge events"
+  type        = string
+}
+
+variable "connections_table" {
+  description = "Name of the DynamoDB table for WebSocket connections"
+  type        = string
+}
+
+variable "lambda_role_arn" {
+  description = "ARN of the IAM role for Lambda functions"
   type        = string
 }
 
@@ -111,4 +84,14 @@ variable "websocket_memory" {
   description = "Memory allocation for WebSocket Lambda functions in MB"
   type        = number
   default     = 256
+}
+
+variable "audio_processing_rule_arn" {
+  description = "ARN of the audio processing EventBridge rule"
+  type        = string
+}
+
+variable "audio_validation_rule_arn" {
+  description = "ARN of the audio validation EventBridge rule"
+  type        = string
 } 

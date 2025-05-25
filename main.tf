@@ -83,6 +83,10 @@ module "eventbridge" {
   event_source      = var.event_source
   event_detail_type = var.event_detail_type
   log_retention_days = var.log_retention_days
+  
+  # Lambda function ARNs for targets
+  process_audio_function_arn = module.lambda.process_audio_function_arn
+  validate_audio_function_arn = module.lambda.validate_audio_function_arn
 }
 
 # IAM Module
@@ -90,10 +94,14 @@ module "iam" {
   source = "./modules/iam"
 
   prefix            = var.prefix
-  audio_bucket_name = var.audio_bucket_name
+  audio_bucket_name = aws_s3_bucket.audio_storage.id
   kms_key_arn       = module.kms.key_arn
   event_bus_arn     = module.eventbridge.event_bus_arn
   connections_table = var.connections_table
+
+  depends_on = [
+    aws_s3_bucket.audio_storage
+  ]
 }
 
 # KMS Module
@@ -111,17 +119,22 @@ module "lambda" {
 
   prefix            = var.prefix
   lambda_functions  = var.lambda_functions
-  audio_bucket_name = var.audio_bucket_name
-  kms_key_id        = module.kms.key_id
-  event_bus_arn     = module.eventbridge.event_bus_arn
+  audio_bucket_name = aws_s3_bucket.audio_storage.id
   connections_table = var.connections_table
-  enable_echo_mode  = var.enable_echo_mode
-  event_rule_arn    = module.eventbridge.audio_processing_rule_arn
+  audio_processing_rule_arn = module.eventbridge.audio_processing_rule_arn
+  audio_validation_rule_arn = module.eventbridge.audio_validation_rule_arn
   lambda_role_arn   = module.iam.lambda_role_arn
   event_bus_name    = module.eventbridge.event_bus_name
   event_source      = var.event_source
   api_gateway_id    = module.api_gateway.api_id
   api_gateway_execution_arn = module.api_gateway.execution_arn
+  environment       = var.environment
+
+  depends_on = [
+    aws_s3_bucket.audio_storage,
+    aws_s3_bucket_versioning.audio_storage,
+    aws_s3_bucket_server_side_encryption_configuration.audio_storage
+  ]
 }
 
 # Lambda Deployment Packages
@@ -169,12 +182,42 @@ module "security_groups" {
 
 # Storage Resources
 resource "aws_s3_bucket" "audio_storage" {
-  bucket = "${var.project_name}-audio-storage-${data.aws_caller_identity.current.account_id}"
+  bucket = var.audio_bucket_name
 
   tags = {
     Name        = "${var.project_name}-audio-storage"
     Environment = var.environment
   }
+}
+
+# Enable versioning for the S3 bucket
+resource "aws_s3_bucket_versioning" "audio_storage" {
+  bucket = aws_s3_bucket.audio_storage.id
+  versioning_configuration {
+    status = "Enabled"
+  }
+}
+
+# Enable server-side encryption for the S3 bucket
+resource "aws_s3_bucket_server_side_encryption_configuration" "audio_storage" {
+  bucket = aws_s3_bucket.audio_storage.id
+
+  rule {
+    apply_server_side_encryption_by_default {
+      kms_master_key_id = module.kms.key_arn
+      sse_algorithm     = "aws:kms"
+    }
+  }
+}
+
+# Block public access to the S3 bucket
+resource "aws_s3_bucket_public_access_block" "audio_storage" {
+  bucket = aws_s3_bucket.audio_storage.id
+
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
 }
 
 # VPC Module

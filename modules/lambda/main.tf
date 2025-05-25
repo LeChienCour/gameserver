@@ -11,9 +11,8 @@ resource "aws_lambda_function" "process_audio" {
   environment {
     variables = {
       AUDIO_BUCKET = var.audio_bucket_name
-      KMS_KEY_ID = var.kms_key_id
-      EVENT_BUS_ARN = var.event_bus_arn
-      CONNECTIONS_TABLE = var.connections_table
+      EVENT_BUS_NAME = var.event_bus_name
+      EVENT_SOURCE = var.event_source
     }
   }
 
@@ -35,9 +34,9 @@ resource "aws_lambda_function" "validate_audio" {
 
   environment {
     variables = {
-      EVENT_BUS_ARN = var.event_bus_arn
       CONNECTIONS_TABLE = var.connections_table
-      ECHO_MODE = var.enable_echo_mode
+      EVENT_BUS_NAME = var.event_bus_name
+      EVENT_SOURCE = var.event_source
     }
   }
 
@@ -59,12 +58,9 @@ resource "aws_lambda_function" "connect" {
   memory_size     = var.websocket_memory
 
   environment {
-    variables = merge(
-      {
-        CONNECTIONS_TABLE = var.connections_table
-      },
-      var.lambda_environment_variables
-    )
+    variables = {
+      CONNECTIONS_TABLE = var.connections_table
+    }
   }
 
   tags = {
@@ -84,12 +80,9 @@ resource "aws_lambda_function" "disconnect" {
   memory_size     = var.websocket_memory
 
   environment {
-    variables = merge(
-      {
-        CONNECTIONS_TABLE = var.connections_table
-      },
-      var.lambda_environment_variables
-    )
+    variables = {
+      CONNECTIONS_TABLE = var.connections_table
+    }
   }
 
   tags = {
@@ -109,14 +102,11 @@ resource "aws_lambda_function" "message" {
   memory_size     = var.websocket_memory
 
   environment {
-    variables = merge(
-      {
-        CONNECTIONS_TABLE = var.connections_table,
-        EVENT_BUS_NAME = var.event_bus_name,
-        EVENT_SOURCE = var.event_source
-      },
-      var.lambda_environment_variables
-    )
+    variables = {
+      CONNECTIONS_TABLE = var.connections_table
+      EVENT_BUS_NAME = var.event_bus_name
+      EVENT_SOURCE = var.event_source
+    }
   }
 
   tags = {
@@ -132,7 +122,7 @@ resource "aws_lambda_permission" "process_audio" {
   action        = "lambda:InvokeFunction"
   function_name = aws_lambda_function.process_audio.function_name
   principal     = "events.amazonaws.com"
-  source_arn    = var.event_rule_arn
+  source_arn    = var.audio_processing_rule_arn
 }
 
 resource "aws_lambda_permission" "validate_audio" {
@@ -140,7 +130,7 @@ resource "aws_lambda_permission" "validate_audio" {
   action        = "lambda:InvokeFunction"
   function_name = aws_lambda_function.validate_audio.function_name
   principal     = "events.amazonaws.com"
-  source_arn    = var.event_rule_arn
+  source_arn    = var.audio_validation_rule_arn
 }
 
 # Lambda Permissions for API Gateway Integration
