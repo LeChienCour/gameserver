@@ -1,6 +1,7 @@
 # Game Server Infrastructure
 
-This repository contains the Terraform infrastructure code for a game server with real-time voice chat capabilities.
+This repository contains the Terraform infrastructure code for a game server with real-time voice chat capabilities. 
+Gameserver and VoiceChat Infraestructure
 
 ## Architecture Overview
 
