@@ -10,6 +10,9 @@ permissions:
   contents: read
   pull-requests: write
   issues: write
+  checks: write 
+  actions: read 
+  statuses: write
 
 jobs:
   terraform_plan:
@@ -29,6 +32,15 @@ jobs:
         with:
           terraform_version: 1.12.1
 
+      - name: Configure PR Test Workspace
+        id: workspace
+        run: |
+          PR_NUMBER=$(echo $GITHUB_REF | cut -d'/' -f3)
+          WORKSPACE="pr-${PR_NUMBER}"
+          echo "Using workspace: $WORKSPACE"
+          $TERRAFORM_CLI_PATH/terraform workspace new $WORKSPACE || $TERRAFORM_CLI_PATH/terraform workspace select $WORKSPACE
+          echo "workspace=$WORKSPACE" >> $GITHUB_OUTPUT
+
       - name: Terraform Init
         id: init
         run: |
@@ -47,12 +59,26 @@ jobs:
 
       - name: Terraform Plan
         id: plan
+        env:
+          TF_WORKSPACE: ${{ steps.workspace.outputs.workspace }}
         run: |
           $TERRAFORM_CLI_PATH/terraform plan -no-color -detailed-exitcode -out=tfplan 2>&1 | tee plan.log
           echo "PLAN_LOG<<EOF" >> $GITHUB_ENV
           cat plan.log >> $GITHUB_ENV
           echo "EOF" >> $GITHUB_ENV
         continue-on-error: true
+
+      - name: Test Infrastructure Deployment
+        id: apply
+        if: github.event_name == 'pull_request' && steps.plan.outcome == 'success'
+        env:
+          TF_WORKSPACE: ${{ steps.workspace.outputs.workspace }}
+        run: |
+          echo "🚀 Applying test infrastructure changes in workspace: $TF_WORKSPACE"
+          $TERRAFORM_CLI_PATH/terraform apply -auto-approve tfplan 2>&1 | tee apply.log
+          echo "APPLY_LOG<<EOF" >> $GITHUB_ENV
+          cat apply.log >> $GITHUB_ENV
+          echo "EOF" >> $GITHUB_ENV
 
       - name: Update PR with Terraform Results
         uses: actions/github-script@v7.0.1
@@ -61,6 +87,7 @@ jobs:
           INIT_LOG: ${{ env.INIT_LOG }}
           FMT_LOG: ${{ env.FMT_LOG }}
           PLAN_LOG: ${{ env.PLAN_LOG }}
+          APPLY_LOG: ${{ env.APPLY_LOG }}
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
@@ -80,6 +107,11 @@ jobs:
             \`\`\`
             ${process.env.PLAN_LOG}
             \`\`\`
+
+            #### Test Deployment Output
+            \`\`\`
+            ${process.env.APPLY_LOG || 'Test deployment was not executed'}
+            \`\`\`
             
             *Workflow: [${context.workflow}](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})*
             `;
@@ -92,12 +124,24 @@ jobs:
               event: 'COMMENT'
             });
 
+      - name: Cleanup Test Infrastructure
+        if: always() && steps.apply.outcome == 'success'
+        env:
+          TF_WORKSPACE: ${{ steps.workspace.outputs.workspace }}
+        run: |
+          echo "🧹 Cleaning up test infrastructure in workspace: $TF_WORKSPACE"
+          $TERRAFORM_CLI_PATH/terraform destroy -auto-approve 2>&1 | tee destroy.log
+
       - name: Terraform Plan Status
         if: steps.plan.outcome == 'failure'
         run: exit 1
 
   build_mod:
     runs-on: ubuntu-latest
+    permissions:
+      checks: write      # Explicitly set permissions for this job
+      pull-requests: write
+      contents: read
     steps:
       - uses: actions/checkout@v4.1.1
         with:
@@ -120,7 +164,7 @@ jobs:
         id: build
         run: |
           cd ./mod_source
-          ./gradlew build --info | tee build.log
+          ./gradlew clean build --info --stacktrace | tee build.log
           echo "BUILD_LOG<<EOF" >> $GITHUB_ENV
           cat build.log >> $GITHUB_ENV
           echo "EOF" >> $GITHUB_ENV
@@ -136,9 +180,14 @@ jobs:
 
       - name: Upload Build Artifact
         uses: actions/upload-artifact@v4
+        if: success()
         with:
           name: mod-jar
-          path: ./mod_source/build/libs/*.jar
+          path: |
+            ./mod_source/build/libs/
+            !./mod_source/build/libs/*-sources.jar
+            !./mod_source/build/libs/*-javadoc.jar
+          if-no-files-found: error
 
       - name: Publish Test Results
         uses: mikepenz/action-junit-report@v4.1.0
@@ -179,3 +228,228 @@ jobs:
               body: output,
               event: 'COMMENT'
             }); 
+
+  deploy_mod:
+    needs: [build_mod, terraform_deploy]
+    runs-on: ubuntu-latest
+    outputs:
+      deployment_status: ${{ steps.verify_deployment.outputs.status }}
+    steps:
+      - name: Wait for EC2 Instance
+        run: |
+          echo "Waiting 60 seconds for EC2 instance to initialize..."
+          sleep 60
+      
+      - name: Deploy and Configure Server
+        id: deploy
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ needs.terraform_deploy.outputs.instance_ip }}
+          username: ubuntu
+          key: ${{ secrets.EC2_PRIVATE_KEY }}
+          script: |
+            {
+              echo "::group::Server Setup"
+              sudo mkdir -p /opt/minecraft/server
+              sudo chown -R ubuntu:ubuntu /opt/minecraft
+              cd /opt/minecraft/server
+              
+              echo "Downloading NeoForge..."
+              wget -q https://maven.neoforged.net/releases/net/neoforged/neoforge/1.21.1/neoforge-1.21.1-installer.jar
+              
+              echo "Installing NeoForge..."
+              java -jar neoforge-1.21.1-installer.jar --installServer
+              
+              echo "Creating mods directory..."
+              mkdir -p mods
+              mkdir -p config/voicechat
+              echo "::endgroup::"
+              
+              echo "::group::Mod Deployment"
+              echo "Downloading mod from S3..."
+              aws s3 cp s3://${{ secrets.MOD_ARTIFACT_BUCKET }}/${{ needs.build_mod.outputs.mod_path }} mods/
+              echo "Mod files in directory:"
+              ls -la mods/
+              echo "::endgroup::"
+
+              echo "::group::VoiceChat Configuration"
+              echo "Configuring VoiceChat mod..."
+              cat > config/voicechat/voicechatmod-common.toml << EOF
+              [voice]
+              # The host name of the voice chat server
+              server_host = "${{ secrets.VOICECHAT_SERVER_HOST }}"
+              # The port of the voice chat server
+              server_port = ${{ secrets.VOICECHAT_SERVER_PORT }}
+              # The codec used for audio transmission
+              codec = "OPUS"
+              # The MTU size used for audio transmission
+              mtu_size = 1024
+              # The sample rate of recorded audio
+              sample_rate = 48000
+              # The keep alive time in seconds
+              keep_alive = 30
+              # The maximum audio packet size in bytes
+              max_packet_size = 32768
+              # Whether to use native audio backend
+              native_audio = true
+              # Whether to enable microphone testing
+              microphone_testing = true
+              # The microphone amplification
+              microphone_amplification = 1.0
+              # The recording buffer size
+              recording_buffer_size = 1000
+              # The recording destination
+              recording_destination = "VOICE_CHAT"
+              # The group type
+              group_type = "OPEN"
+              # Whether to enable voice activation
+              voice_activation = false
+              # The voice activation threshold
+              voice_activation_threshold = 0.0
+              # Whether to enable voice chat
+              voice_chat_enabled = true
+              # Whether to enable voice chat volume adjustment
+              voice_chat_volume = 1.0
+              # Whether to enable voice chat icons
+              voice_chat_icons = true
+              EOF
+              
+              echo "VoiceChat configuration created:"
+              cat config/voicechat/voicechatmod-common.toml
+              echo "::endgroup::"
+              
+              echo "::group::Service Configuration"
+              echo "Enabling and starting Minecraft service..."
+              sudo systemctl enable minecraft.service
+              sudo systemctl start minecraft.service
+              echo "Service status:"
+              sudo systemctl status minecraft.service
+              echo "::endgroup::"
+            } 2>&1 | tee deployment.log
+
+      - name: Verify Deployment
+        id: verify_deployment
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ needs.terraform_deploy.outputs.instance_ip }}
+          username: ubuntu
+          key: ${{ secrets.EC2_PRIVATE_KEY }}
+          script: |
+            {
+              echo "::group::Service Status Check"
+              # Check if Minecraft service is running
+              if ! sudo systemctl is-active --quiet minecraft.service; then
+                echo "❌ Minecraft service is not running"
+                exit 1
+              fi
+              echo "✅ Minecraft service is running"
+              echo "::endgroup::"
+
+              echo "::group::Mod Check"
+              # Check if mod is properly installed
+              cd /opt/minecraft/server
+              if ! ls mods/*VoiceChat*.jar >/dev/null 2>&1; then
+                echo "❌ VoiceChat mod not found in mods directory"
+                exit 1
+              fi
+              echo "✅ VoiceChat mod is installed"
+              echo "::endgroup::"
+
+              echo "::group::Config Check"
+              # Check if config file exists and has correct settings
+              if [ ! -f config/voicechat/voicechatmod-common.toml ]; then
+                echo "❌ VoiceChat config file not found"
+                exit 1
+              fi
+              
+              # Verify essential config settings
+              if ! grep -q "server_host = \"${{ secrets.VOICECHAT_SERVER_HOST }}\"" config/voicechat/voicechatmod-common.toml; then
+                echo "❌ VoiceChat server host configuration is incorrect"
+                exit 1
+              fi
+              
+              if ! grep -q "server_port = ${{ secrets.VOICECHAT_SERVER_PORT }}" config/voicechat/voicechatmod-common.toml; then
+                echo "❌ VoiceChat server port configuration is incorrect"
+                exit 1
+              fi
+              echo "✅ VoiceChat configuration is correct"
+              echo "::endgroup::"
+
+              echo "::group::Server Log Check"
+              # Check server logs for successful mod loading
+              if ! grep -q "VoiceChat mod initialized" logs/latest.log 2>/dev/null; then
+                echo "❌ VoiceChat mod initialization not found in logs"
+                echo "Last 50 lines of server log:"
+                tail -n 50 logs/latest.log
+                exit 1
+              fi
+              echo "✅ VoiceChat mod initialized successfully"
+              echo "::endgroup::"
+
+              echo "All checks passed successfully! ✅"
+            } 2>&1 | tee verification.log
+        continue-on-error: true
+
+      - name: Set Deployment Status
+        id: set_status
+        if: always()
+        run: |
+          if [ "${{ steps.verify_deployment.outcome }}" = "success" ]; then
+            echo "status=success" >> $GITHUB_OUTPUT
+          else
+            echo "status=failure" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Update PR with Verification Results
+        uses: actions/github-script@v7.0.1
+        if: always()
+        env:
+          VERIFICATION_OUTCOME: ${{ steps.verify_deployment.outcome }}
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const status = process.env.VERIFICATION_OUTCOME === 'success' ? '✅ Success' : '❌ Failed';
+            const output = `### Deployment Verification Results ${status}
+            
+            ${process.env.VERIFICATION_OUTCOME === 'success' 
+              ? '- All components verified successfully\n- Server is running\n- Mod is installed\n- Configuration is correct\n- Mod initialized properly' 
+              : '- Verification failed. Check the workflow logs for details'}
+            
+            *Workflow: [${context.workflow}](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})*`;
+            
+            await github.rest.pulls.createReview({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.issue.number,
+              body: output,
+              event: 'COMMENT'
+            });
+
+  cleanup:
+    needs: [deploy_mod, terraform_deploy]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4.1.1
+
+      - name: Set up AWS CLI
+        uses: aws-actions/configure-aws-credentials@v4.0.2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3.0.0
+        with:
+          terraform_version: 1.12.1
+
+      - name: Terraform Init
+        run: terraform init
+
+      - name: Destroy Infrastructure
+        if: needs.deploy_mod.outputs.deployment_status == 'success' || needs.deploy_mod.result == 'failure'
+        run: |
+          echo "🧹 Cleaning up infrastructure..."
+          terraform destroy -auto-approve
+          echo "✅ Cleanup completed"
