@@ -97,7 +97,7 @@ jobs:
         run: exit 1
 
   build_mod:
-    runs-on: windows-latest
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4.1.1
         with:
@@ -113,32 +113,29 @@ jobs:
           cache: gradle
 
       - name: Grant execute permission for gradlew
-        run: chmod +x ./mod_source/gradlew
+        run: |
+          chmod +x ./mod_source/gradlew
 
       - name: Build with Gradle
         id: build
-        shell: pwsh
         run: |
           cd ./mod_source
-          ./gradlew build --info 2>&1 | Out-File -FilePath build.log
-          $buildLog = Get-Content -Path build.log -Raw
-          "BUILD_LOG<<EOF" >> $env:GITHUB_ENV
-          $buildLog >> $env:GITHUB_ENV
-          "EOF" >> $env:GITHUB_ENV
+          ./gradlew build --info | tee build.log
+          echo "BUILD_LOG<<EOF" >> $GITHUB_ENV
+          cat build.log >> $GITHUB_ENV
+          echo "EOF" >> $GITHUB_ENV
 
       - name: Run Tests
         id: test
-        shell: pwsh
         run: |
           cd ./mod_source
-          ./gradlew test --info 2>&1 | Out-File -FilePath test.log
-          $testLog = Get-Content -Path test.log -Raw
-          "TEST_LOG<<EOF" >> $env:GITHUB_ENV
-          $testLog >> $env:GITHUB_ENV
-          "EOF" >> $env:GITHUB_ENV
+          ./gradlew test --info | tee test.log
+          echo "TEST_LOG<<EOF" >> $GITHUB_ENV
+          cat test.log >> $GITHUB_ENV
+          echo "EOF" >> $GITHUB_ENV
 
       - name: Upload Build Artifact
-        uses: actions/upload-artifact@v3.1.3
+        uses: actions/upload-artifact@v4
         with:
           name: mod-jar
           path: ./mod_source/build/libs/*.jar

@@ -61,7 +61,7 @@ jobs:
 
   build_mod:
     needs: [terraform_deploy]
-    runs-on: windows-latest
+    runs-on: ubuntu-latest
     outputs:
       mod_path: ${{ github.workspace }}/mod_source/build/libs/voicechatmod-1.0.jar
     steps:
@@ -78,16 +78,13 @@ jobs:
       
       - name: Build and Configure Mod
         id: build
-        shell: pwsh
         run: |
           echo "::group::Mod Configuration"
-          Set-ExecutionPolicy Bypass -Scope Process -Force
+          chmod +x ./mod_source/gradlew
           cd ./mod_source/src/main/resources/config
           echo "Updating client ID in config..."
-          $content = Get-Content -Path voicechatmod-common.toml -Raw
-          $content = $content -replace 'YOUR_CLIENT_ID', '${{ needs.terraform_deploy.outputs.user_pool_id }}'
-          Set-Content -Path voicechatmod-common.toml -Value $content
-          Get-Content voicechatmod-common.toml
+          sed -i "s/YOUR_CLIENT_ID/${{ needs.terraform_deploy.outputs.user_pool_id }}/g" voicechatmod-common.toml
+          cat voicechatmod-common.toml
           cd ../../../
           echo "::endgroup::"
           
@@ -96,10 +93,10 @@ jobs:
           echo "::endgroup::"
           
           echo "::group::Build Artifacts"
-          Get-ChildItem -Path build/libs/
+          ls -la build/libs/
           echo "::endgroup::"
       
-      - uses: actions/upload-artifact@v3.1.3
+      - uses: actions/upload-artifact@v4
         with:
           name: mod-jar
           path: ./mod_source/build/libs/*.jar
@@ -189,7 +186,7 @@ jobs:
               echo "::endgroup::"
             } 2>&1 | tee verification.log
 
-      - uses: actions/upload-artifact@v3.1.3
+      - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: deployment-summary
