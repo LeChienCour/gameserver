@@ -241,18 +241,12 @@ jobs:
             --info \
             -Pmod_version=0.0.1
           
-          # Show build results
-          echo "Build complete. Checking results..."
-          echo "Project structure after build:"
-          ls -la
-          
+          # Verify build output
           if [ -d "build/libs" ]; then
             echo "Build artifacts created:"
             ls -la build/libs/
           else
             echo "Error: No build/libs directory found after build!"
-            echo "Contents of build directory:"
-            ls -la build/
             exit 1
           fi
 
@@ -283,15 +277,6 @@ jobs:
           echo "TEST_LOG<<EOF" >> $GITHUB_ENV
           cat test.log >> $GITHUB_ENV
           echo "EOF" >> $GITHUB_ENV
-
-      - name: Upload Build Artifact
-        uses: actions/upload-artifact@v4
-        if: success()
-        with:
-          name: mod-jar
-          path: mod_source/build/libs/
-          if-no-files-found: error
-          retention-days: 5
 
       - name: Upload to S3
         if: success()
@@ -366,160 +351,87 @@ jobs:
     outputs:
       deployment_status: ${{ steps.verify_deployment.outputs.status }}
     steps:
-      - name: Wait for EC2 Instance
+      - name: Create VoiceChat Config
+        id: create_config
         run: |
-          echo "Waiting 60 seconds for EC2 instance to initialize..."
-          sleep 60
-      
-      - name: Deploy and Configure Server
-        id: deploy
+          mkdir -p VoiceChatMod/runs/client/config
+          cat > VoiceChatMod/runs/client/config/voicechat-common.toml << 'EOF'
+          enableVoiceChat = true
+          defaultVolume = 0.7
+          maxVoiceDistance = 64
+          reconnectionAttempts = 3
+          reconnectionDelay = 5
+          websocketStageUrl = "${{ secrets.WEBSOCKET_STAGE_URL }}"
+          websocketApiKey = "${{ secrets.WEBSOCKET_API_KEY }}"
+          userPoolId = "${{ secrets.USER_POOL_ID }}"
+          userPoolClientId = "${{ secrets.USER_POOL_CLIENT_ID }}"
+          selectedMicrophone = ""
+          useSystemDefaultMic = true
+          microphoneBoost = 1.0
+          EOF
+
+      - name: Deploy to Server
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ needs.terraform_deploy.outputs.instance_ip }}
           username: ubuntu
           key: ${{ secrets.EC2_PRIVATE_KEY }}
           script: |
-            {
-              echo "::group::Server Setup"
-              sudo mkdir -p /opt/minecraft/server
-              sudo chown -R ubuntu:ubuntu /opt/minecraft
-              cd /opt/minecraft/server
-              
-              echo "Downloading NeoForge..."
-              wget -q https://maven.neoforged.net/releases/net/neoforged/neoforge/1.21.1/neoforge-1.21.1-installer.jar
-              
-              echo "Installing NeoForge..."
-              java -jar neoforge-1.21.1-installer.jar --installServer
-              
-              echo "Creating mods directory..."
-              mkdir -p mods
-              mkdir -p config/voicechat
-              echo "::endgroup::"
-              
-              echo "::group::Mod Deployment"
-              echo "Downloading mod from S3..."
-              aws s3 cp s3://${{ secrets.MOD_ARTIFACT_BUCKET }}/${{ needs.build_mod.outputs.mod_path }} mods/
-              echo "Mod files in directory:"
-              ls -la mods/
-              echo "::endgroup::"
-
-              echo "::group::VoiceChat Configuration"
-              echo "Configuring VoiceChat mod..."
-              cat > config/voicechat/voicechatmod-common.toml << EOF
-              [voice]
-              # The host name of the voice chat server
-              server_host = "${{ secrets.VOICECHAT_SERVER_HOST }}"
-              # The port of the voice chat server
-              server_port = ${{ secrets.VOICECHAT_SERVER_PORT }}
-              # The codec used for audio transmission
-              codec = "OPUS"
-              # The MTU size used for audio transmission
-              mtu_size = 1024
-              # The sample rate of recorded audio
-              sample_rate = 48000
-              # The keep alive time in seconds
-              keep_alive = 30
-              # The maximum audio packet size in bytes
-              max_packet_size = 32768
-              # Whether to use native audio backend
-              native_audio = true
-              # Whether to enable microphone testing
-              microphone_testing = true
-              # The microphone amplification
-              microphone_amplification = 1.0
-              # The recording buffer size
-              recording_buffer_size = 1000
-              # The recording destination
-              recording_destination = "VOICE_CHAT"
-              # The group type
-              group_type = "OPEN"
-              # Whether to enable voice activation
-              voice_activation = false
-              # The voice activation threshold
-              voice_activation_threshold = 0.0
-              # Whether to enable voice chat
-              voice_chat_enabled = true
-              # Whether to enable voice chat volume adjustment
-              voice_chat_volume = 1.0
-              # Whether to enable voice chat icons
-              voice_chat_icons = true
-              EOF
-              
-              echo "VoiceChat configuration created:"
-              cat config/voicechat/voicechatmod-common.toml
-              echo "::endgroup::"
-              
-              echo "::group::Service Configuration"
-              echo "Enabling and starting Minecraft service..."
-              sudo systemctl enable minecraft.service
-              sudo systemctl start minecraft.service
-              echo "Service status:"
-              sudo systemctl status minecraft.service
-              echo "::endgroup::"
-            } 2>&1 | tee deployment.log
+            # Setup directories
+            sudo mkdir -p /opt/minecraft/server
+            sudo chown -R ubuntu:ubuntu /opt/minecraft
+            cd /opt/minecraft/server
+            mkdir -p VoiceChatMod/runs/client/config mods
+            
+            # Install NeoForge
+            wget -q https://maven.neoforged.net/releases/net/neoforged/neoforge/1.21.1/neoforge-1.21.1-installer.jar
+            java -jar neoforge-1.21.1-installer.jar --installServer
+            
+            # Download mod
+            aws s3 cp s3://voice-chat-mod-minecraft-1.21.4/${{ env.s3_artifact_path }} mods/
+            
+            # Copy config
+            aws s3 cp s3://voice-chat-mod-minecraft-1.21.4/config/voicechat-common.toml VoiceChatMod/runs/client/config/
+            
+            # Start service
+            sudo systemctl enable minecraft.service
+            sudo systemctl start minecraft.service
 
       - name: Verify Deployment
-        id: verify_deployment
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ needs.terraform_deploy.outputs.instance_ip }}
           username: ubuntu
           key: ${{ secrets.EC2_PRIVATE_KEY }}
           script: |
-            {
-              echo "::group::Service Status Check"
-              # Check if Minecraft service is running
-              if ! sudo systemctl is-active --quiet minecraft.service; then
-                echo "❌ Minecraft service is not running"
-                exit 1
-              fi
-              echo "✅ Minecraft service is running"
-              echo "::endgroup::"
-
-              echo "::group::Mod Check"
-              # Check if mod is properly installed
-              cd /opt/minecraft/server
-              if ! ls mods/*VoiceChat*.jar >/dev/null 2>&1; then
-                echo "❌ VoiceChat mod not found in mods directory"
-                exit 1
-              fi
-              echo "✅ VoiceChat mod is installed"
-              echo "::endgroup::"
-
-              echo "::group::Config Check"
-              # Check if config file exists and has correct settings
-              if [ ! -f config/voicechat/voicechatmod-common.toml ]; then
-                echo "❌ VoiceChat config file not found"
-                exit 1
-              fi
-              
-              # Verify essential config settings
-              if ! grep -q "server_host = \"${{ secrets.VOICECHAT_SERVER_HOST }}\"" config/voicechat/voicechatmod-common.toml; then
-                echo "❌ VoiceChat server host configuration is incorrect"
-                exit 1
-              fi
-              
-              if ! grep -q "server_port = ${{ secrets.VOICECHAT_SERVER_PORT }}" config/voicechat/voicechatmod-common.toml; then
-                echo "❌ VoiceChat server port configuration is incorrect"
-                exit 1
-              fi
-              echo "✅ VoiceChat configuration is correct"
-              echo "::endgroup::"
-
-              echo "::group::Server Log Check"
-              # Check server logs for successful mod loading
-              if ! grep -q "VoiceChat mod initialized" logs/latest.log 2>/dev/null; then
-                echo "❌ VoiceChat mod initialization not found in logs"
-                echo "Last 50 lines of server log:"
-                tail -n 50 logs/latest.log
-                exit 1
-              fi
-              echo "✅ VoiceChat mod initialized successfully"
-              echo "::endgroup::"
-
-              echo "All checks passed successfully! ✅"
-            } 2>&1 | tee verification.log
-        continue-on-error: true
+            cd /opt/minecraft/server
+            
+            # Service check
+            if ! sudo systemctl is-active --quiet minecraft.service; then
+              echo "❌ Service check failed"
+              exit 1
+            fi
+            
+            # Mod check
+            if ! ls mods/*VoiceChat*.jar >/dev/null 2>&1; then
+              echo "❌ Mod check failed"
+              exit 1
+            fi
+            
+            # Config check
+            if ! [ -f VoiceChatMod/runs/client/config/voicechat-common.toml ]; then
+              echo "❌ Config check failed"
+              exit 1
+            fi
+            
+            # Log check
+            if ! grep -q "VoiceChat mod initialized" logs/latest.log; then
+              echo "❌ Mod initialization failed"
+              tail -n 50 logs/latest.log
+              exit 1
+            fi
+            
+            echo "✅ All checks passed"
 
       - name: Set Deployment Status
         id: set_status
