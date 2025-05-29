@@ -221,10 +221,10 @@ jobs:
           path: ./mod_source
           ref: main
 
-      - name: Set up JDK 24
+      - name: Set up JDK 17
         uses: actions/setup-java@v3.13.0
         with:
-          java-version: '24'
+          java-version: '17'
           distribution: 'temurin'
           cache: gradle
 
@@ -256,7 +256,7 @@ jobs:
         with:
           name: mod-jar
           path: |
-            ./mod_source/build/libs/
+            ./mod_source/build/libs/*.jar
             !./mod_source/build/libs/*-sources.jar
             !./mod_source/build/libs/*-javadoc.jar
           if-no-files-found: error
