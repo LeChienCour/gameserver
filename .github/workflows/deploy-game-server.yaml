@@ -7,7 +7,7 @@ on:
 
 jobs:
   terraform_deploy:
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
     outputs:
       instance_ip: ${{ steps.terraform_apply.outputs.instance_ip }}
       user_pool_id: ${{ steps.terraform_apply.outputs.user_pool_client_id }}
@@ -22,7 +22,7 @@ jobs:
       
       - uses: hashicorp/setup-terraform@v3.0.0
         with:
-          terraform_version: 1.5.7
+          terraform_version: 1.12.1
       
       - name: Terraform Init
         id: init
@@ -54,7 +54,7 @@ jobs:
 
   build_mod:
     needs: [terraform_deploy]
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
     outputs:
       mod_path: ${{ github.workspace }}/mod_source/build/libs/voicechatmod-1.0.jar
     steps:
@@ -65,8 +65,8 @@ jobs:
       
       - uses: actions/setup-java@v3.13.0
         with:
-          java-version: '17'
-          distribution: 'adoptium'
+          java-version: '24'
+          distribution: 'temurin'
           cache: gradle
       
       - name: Build and Configure Mod
