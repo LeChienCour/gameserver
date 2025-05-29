@@ -1,0 +1,172 @@
+name: Pull Request Checks
+
+on:
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  terraform_plan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Set up AWS CLI
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v2
+        with:
+          terraform_version: 1.5.7
+
+      - name: Terraform Init
+        id: init
+        run: |
+          terraform init 2>&1 | tee init.log
+          echo "INIT_LOG<<EOF" >> $GITHUB_ENV
+          cat init.log >> $GITHUB_ENV
+          echo "EOF" >> $GITHUB_ENV
+
+      - name: Terraform Format Check
+        id: fmt
+        run: |
+          terraform fmt -check -recursive 2>&1 | tee fmt.log
+          echo "FMT_LOG<<EOF" >> $GITHUB_ENV
+          cat fmt.log >> $GITHUB_ENV
+          echo "EOF" >> $GITHUB_ENV
+
+      - name: Terraform Plan
+        id: plan
+        run: |
+          terraform plan -no-color -detailed-exitcode -out=tfplan 2>&1 | tee plan.log
+          echo "PLAN_LOG<<EOF" >> $GITHUB_ENV
+          cat plan.log >> $GITHUB_ENV
+          echo "EOF" >> $GITHUB_ENV
+        continue-on-error: true
+
+      - name: Update PR with Terraform Results
+        uses: actions/github-script@v6
+        if: always()
+        env:
+          INIT_LOG: ${{ env.INIT_LOG }}
+          FMT_LOG: ${{ env.FMT_LOG }}
+          PLAN_LOG: ${{ env.PLAN_LOG }}
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const output = `### Terraform Execution Results 🔍
+            
+            #### Init Output
+            \`\`\`
+            ${process.env.INIT_LOG}
+            \`\`\`
+            
+            #### Format Check
+            \`\`\`
+            ${process.env.FMT_LOG}
+            \`\`\`
+            
+            #### Plan Output
+            \`\`\`
+            ${process.env.PLAN_LOG}
+            \`\`\`
+            
+            *Workflow: [${context.workflow}](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})*
+            `;
+            
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: output
+            })
+
+      - name: Terraform Plan Status
+        if: steps.plan.outcome == 'failure'
+        run: exit 1
+
+  build_mod:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          repository: LeChienCour/VoiceChatMod
+          path: ./mod_source
+          ref: ${{ github.head_ref }}
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v3
+        with:
+          java-version: '17'
+          distribution: 'adoptium'
+          cache: gradle
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x ./mod_source/gradlew
+
+      - name: Build with Gradle
+        id: build
+        run: |
+          cd ./mod_source
+          ./gradlew build --info 2>&1 | tee build.log
+          echo "BUILD_LOG<<EOF" >> $GITHUB_ENV
+          cat build.log >> $GITHUB_ENV
+          echo "EOF" >> $GITHUB_ENV
+
+      - name: Run Tests
+        id: test
+        run: |
+          cd ./mod_source
+          ./gradlew test --info 2>&1 | tee test.log
+          echo "TEST_LOG<<EOF" >> $GITHUB_ENV
+          cat test.log >> $GITHUB_ENV
+          echo "EOF" >> $GITHUB_ENV
+
+      - name: Upload Build Artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: mod-jar
+          path: ./mod_source/build/libs/*.jar
+
+      - name: Publish Test Results
+        uses: mikepenz/action-junit-report@v3
+        if: always()
+        with:
+          report_paths: '**/build/test-results/test/TEST-*.xml'
+          detailed_summary: true
+          include_passed: true
+
+      - name: Update PR with Build Results
+        uses: actions/github-script@v6
+        if: always()
+        env:
+          BUILD_LOG: ${{ env.BUILD_LOG }}
+          TEST_LOG: ${{ env.TEST_LOG }}
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const output = `### Mod Build Results 🛠️
+            
+            #### Build Output
+            \`\`\`
+            ${process.env.BUILD_LOG}
+            \`\`\`
+            
+            #### Test Output
+            \`\`\`
+            ${process.env.TEST_LOG}
+            \`\`\`
+            
+            *Workflow: [${context.workflow}](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})*
+            `;
+            
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: output
+            }) 

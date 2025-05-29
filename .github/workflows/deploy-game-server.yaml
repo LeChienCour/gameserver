@@ -1,116 +1,199 @@
-name: Deploy Game Server (Corrected SSM Dependency)
+name: Deploy Game Server
 
 on:
   push:
-    branches:
-      - main
+    branches: [main]
   workflow_dispatch:
 
 jobs:
-  create_infra:
+  terraform_deploy:
     runs-on: ubuntu-latest
+    outputs:
+      instance_ip: ${{ steps.terraform_apply.outputs.instance_ip }}
+      user_pool_id: ${{ steps.terraform_apply.outputs.user_pool_client_id }}
     steps:
       - uses: actions/checkout@v3
-        with:
-          path: ./infra_source
-
-      - name: Set up AWS CLI
-        uses: aws-actions/configure-aws-credentials@v2
+      
+      - uses: aws-actions/configure-aws-credentials@v2
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: us-east-1
-
-      - name: Set up Terraform
-        uses: hashicorp/setup-terraform@v2
+      
+      - uses: hashicorp/setup-terraform@v2
         with:
           terraform_version: 1.5.7
-
+      
       - name: Terraform Init
-        run: terraform init
-        working-directory: ./infra_source
-
+        id: init
+        run: |
+          terraform init 2>&1 | tee init.log
+          echo "::group::Terraform Init Log"
+          cat init.log
+          echo "::endgroup::"
+      
+      - name: Terraform Plan
+        id: plan
+        run: |
+          terraform plan -detailed-exitcode -out=tfplan 2>&1 | tee plan.log
+          echo "::group::Terraform Plan Log"
+          cat plan.log
+          echo "::endgroup::"
+      
       - name: Terraform Apply
         id: terraform_apply
-        run: terraform apply -auto-approve
-        working-directory: ./infra_source
-    outputs:
-      instance_ip: ${{ steps.terraform_apply.outputs.instance_ip }} # Example
-      user_pool_client_id: ${{ steps.terraform_apply.outputs.user_pool_client_id }} # Example
-      # Add other outputs as needed from your Terraform configuration
+        run: |
+          terraform apply -auto-approve tfplan 2>&1 | tee apply.log
+          echo "::group::Terraform Apply Log"
+          cat apply.log
+          echo "::endgroup::"
+          
+          # Extract and set outputs
+          echo "instance_ip=$(terraform output -raw instance_ip)" >> $GITHUB_OUTPUT
+          echo "user_pool_client_id=$(terraform output -raw user_pool_client_id)" >> $GITHUB_OUTPUT
 
   build_mod:
+    needs: [terraform_deploy]
     runs-on: ubuntu-latest
-    needs: [create_infra] # Corrected dependency
+    outputs:
+      mod_path: ${{ github.workspace }}/mod_source/build/libs/voicechatmod-1.0.jar
     steps:
       - uses: actions/checkout@v3
         with:
           repository: LeChienCour/VoiceChatMod
           path: ./mod_source
-
-      - name: Set up JDK 17
-        uses: actions/setup-java@v3
+      
+      - uses: actions/setup-java@v3
         with:
           java-version: '17'
           distribution: 'adoptium'
           cache: gradle
-
-      - name: Grant execute permission for gradlew
-        run: chmod +x ./mod_source/gradlew
-
-      - name: Configure Mod
+      
+      - name: Build and Configure Mod
+        id: build
         run: |
-          echo "Configuring mod with Terraform outputs..."
+          echo "::group::Mod Configuration"
+          chmod +x ./mod_source/gradlew
           cd ./mod_source/src/main/resources/config
-          # Example: Accessing Terraform output directly
-          sed -i "s/YOUR_CLIENT_ID/${{ needs.create_infra.outputs.user_pool_client_id }}/g" voicechatmod-common.toml
-          # Adjust the sed command based on your config file and variables
+          echo "Updating client ID in config..."
+          sed -i "s/YOUR_CLIENT_ID/${{ needs.terraform_deploy.outputs.user_pool_id }}/g" voicechatmod-common.toml
+          cat voicechatmod-common.toml
           cd ../../../
-
-      - name: Build with Gradle
-        run: ./mod_source/gradlew build
-    outputs:
-      mod_path: ${{ github.workspace }}/mod_source/build/libs/voicechatmod-1.0.jar
+          echo "::endgroup::"
+          
+          echo "::group::Gradle Build"
+          ./gradlew build --info
+          echo "::endgroup::"
+          
+          echo "::group::Build Artifacts"
+          ls -la build/libs/
+          echo "::endgroup::"
+      
+      - uses: actions/upload-artifact@v3
+        with:
+          name: mod-jar
+          path: ./mod_source/build/libs/*.jar
+          if-no-files-found: error
 
   deploy_mod:
+    needs: [build_mod, terraform_deploy]
     runs-on: ubuntu-latest
-    needs: [build_mod, create_infra]
     steps:
-      - uses: actions/checkout@v3
-        with:
-          path: ./deploy_source
-
-      - name: Set up AWS CLI
-        uses: aws-actions/configure-aws-credentials@v2
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: us-east-1
-
-      - name: Install Ansible
-        run: sudo apt-get update && sudo apt-get install -y ansible
-
-      - name: Deploy Mod
+      - name: Wait for EC2 Instance
+        run: |
+          echo "Waiting 60 seconds for EC2 instance to initialize..."
+          sleep 60
+      
+      - name: Deploy and Configure Server
         uses: appleboy/ssh-action@v0.1.10
         with:
-          host: ${{ needs.create_infra.outputs.instance_ip }}
+          host: ${{ needs.terraform_deploy.outputs.instance_ip }}
           username: ubuntu
           key: ${{ secrets.EC2_PRIVATE_KEY }}
           script: |
-            echo "Descargando NeoForge..."
-            cd /opt/minecraft/server
-            wget https://maven.neoforged.net/releases/net/neoforged/neoforge/1.21.1/neoforge-1.21.1-installer.jar
-            java -jar neoforge-1.21.1-installer.jar --installServer
+            {
+              echo "::group::Server Setup"
+              sudo mkdir -p /opt/minecraft/server
+              sudo chown -R ubuntu:ubuntu /opt/minecraft
+              cd /opt/minecraft/server
+              
+              echo "Downloading NeoForge..."
+              wget -q https://maven.neoforged.net/releases/net/neoforged/neoforge/1.21.1/neoforge-1.21.1-installer.jar
+              
+              echo "Installing NeoForge..."
+              java -jar neoforge-1.21.1-installer.jar --installServer
+              
+              echo "Creating mods directory..."
+              mkdir -p mods
+              echo "::endgroup::"
+              
+              echo "::group::Mod Deployment"
+              echo "Downloading mod from S3..."
+              aws s3 cp s3://${{ secrets.MOD_ARTIFACT_BUCKET }}/${{ needs.build_mod.outputs.mod_path }} mods/
+              echo "Mod files in directory:"
+              ls -la mods/
+              echo "::endgroup::"
+              
+              echo "::group::Service Configuration"
+              echo "Enabling and starting Minecraft service..."
+              sudo systemctl enable minecraft.service
+              sudo systemctl start minecraft.service
+              echo "Service status:"
+              sudo systemctl status minecraft.service
+              echo "::endgroup::"
+            } 2>&1 | tee deployment.log
 
-            echo "Copiando el mod..."
-            cp ${{ needs.build_mod.outputs.mod_path }} /opt/minecraft/server/mods/voicechatmod-1.0.jar
-
-            echo "Iniciando el servidor..."
-            sudo systemctl restart minecraft.service
-
-  verify_deployment:
+  verify:
+    needs: [deploy_mod, terraform_deploy]
     runs-on: ubuntu-latest
-    needs: [deploy_mod]
     steps:
-      - name: Placeholder for verification steps
-        run: echo "Add verification steps here"
+      - name: Verify Deployment
+        uses: appleboy/ssh-action@v0.1.10
+        with:
+          host: ${{ needs.terraform_deploy.outputs.instance_ip }}
+          username: ubuntu
+          key: ${{ secrets.EC2_PRIVATE_KEY }}
+          script: |
+            {
+              echo "::group::Service Status"
+              systemctl status minecraft.service
+              echo "::endgroup::"
+              
+              echo "::group::Mod Installation"
+              echo "Installed mods:"
+              ls -la /opt/minecraft/server/mods/
+              echo "::endgroup::"
+              
+              echo "::group::Server Logs"
+              echo "Last 50 lines of server log:"
+              tail -n 50 /opt/minecraft/server/logs/latest.log
+              echo "::endgroup::"
+              
+              echo "::group::System Resources"
+              echo "Memory usage:"
+              free -h
+              echo "Disk usage:"
+              df -h
+              echo "CPU load:"
+              uptime
+              echo "::endgroup::"
+            } 2>&1 | tee verification.log
+
+      - name: Create Deployment Summary
+        if: always()
+        run: |
+          echo "## Deployment Status Summary" > deployment_summary.md
+          echo "### Infrastructure" >> deployment_summary.md
+          echo "- Instance IP: ${{ needs.terraform_deploy.outputs.instance_ip }}" >> deployment_summary.md
+          echo "- User Pool ID: ${{ needs.terraform_deploy.outputs.user_pool_id }}" >> deployment_summary.md
+          echo "### Verification Results" >> deployment_summary.md
+          echo "\`\`\`" >> deployment_summary.md
+          cat verification.log >> deployment_summary.md
+          echo "\`\`\`" >> deployment_summary.md
+          
+      - name: Upload Deployment Summary
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: deployment-summary
+          path: deployment_summary.md
