@@ -26,31 +26,36 @@ jobs:
       
       - name: Terraform Init
         id: init
+        shell: pwsh
         run: |
-          terraform init 2>&1 | tee init.log
+          terraform init 2>&1 | Out-File -FilePath init.log
           echo "::group::Terraform Init Log"
-          cat init.log
+          Get-Content init.log
           echo "::endgroup::"
       
       - name: Terraform Plan
         id: plan
+        shell: pwsh
         run: |
-          terraform plan -detailed-exitcode -out=tfplan 2>&1 | tee plan.log
+          terraform plan -detailed-exitcode -out=tfplan 2>&1 | Out-File -FilePath plan.log
           echo "::group::Terraform Plan Log"
-          cat plan.log
+          Get-Content plan.log
           echo "::endgroup::"
       
       - name: Terraform Apply
         id: terraform_apply
+        shell: pwsh
         run: |
-          terraform apply -auto-approve tfplan 2>&1 | tee apply.log
+          terraform apply -auto-approve tfplan 2>&1 | Out-File -FilePath apply.log
           echo "::group::Terraform Apply Log"
-          cat apply.log
+          Get-Content apply.log
           echo "::endgroup::"
           
           # Extract and set outputs
-          echo "instance_ip=$(terraform output -raw instance_ip)" >> $GITHUB_OUTPUT
-          echo "user_pool_client_id=$(terraform output -raw user_pool_client_id)" >> $GITHUB_OUTPUT
+          $instance_ip = terraform output -raw instance_ip
+          $user_pool_client_id = terraform output -raw user_pool_client_id
+          "instance_ip=$instance_ip" >> $env:GITHUB_OUTPUT
+          "user_pool_client_id=$user_pool_client_id" >> $env:GITHUB_OUTPUT
 
   build_mod:
     needs: [terraform_deploy]
@@ -71,13 +76,16 @@ jobs:
       
       - name: Build and Configure Mod
         id: build
+        shell: pwsh
         run: |
           echo "::group::Mod Configuration"
-          chmod +x ./mod_source/gradlew
+          Set-ExecutionPolicy Bypass -Scope Process -Force
           cd ./mod_source/src/main/resources/config
           echo "Updating client ID in config..."
-          sed -i "s/YOUR_CLIENT_ID/${{ needs.terraform_deploy.outputs.user_pool_id }}/g" voicechatmod-common.toml
-          cat voicechatmod-common.toml
+          $content = Get-Content -Path voicechatmod-common.toml -Raw
+          $content = $content -replace 'YOUR_CLIENT_ID', '${{ needs.terraform_deploy.outputs.user_pool_id }}'
+          Set-Content -Path voicechatmod-common.toml -Value $content
+          Get-Content voicechatmod-common.toml
           cd ../../../
           echo "::endgroup::"
           
@@ -86,7 +94,7 @@ jobs:
           echo "::endgroup::"
           
           echo "::group::Build Artifacts"
-          ls -la build/libs/
+          Get-ChildItem -Path build/libs/
           echo "::endgroup::"
       
       - uses: actions/upload-artifact@v3.1.3

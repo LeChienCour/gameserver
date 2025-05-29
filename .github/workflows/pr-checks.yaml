@@ -25,27 +25,33 @@ jobs:
 
       - name: Terraform Init
         id: init
+        shell: pwsh
         run: |
-          terraform init 2>&1 | tee init.log
-          echo "INIT_LOG<<EOF" >> $GITHUB_ENV
-          cat init.log >> $GITHUB_ENV
-          echo "EOF" >> $GITHUB_ENV
+          terraform init 2>&1 | Out-File -FilePath init.log
+          $initLog = Get-Content -Path init.log -Raw
+          "INIT_LOG<<EOF" >> $env:GITHUB_ENV
+          $initLog >> $env:GITHUB_ENV
+          "EOF" >> $env:GITHUB_ENV
 
       - name: Terraform Format Check
         id: fmt
+        shell: pwsh
         run: |
-          terraform fmt -check -recursive 2>&1 | tee fmt.log
-          echo "FMT_LOG<<EOF" >> $GITHUB_ENV
-          cat fmt.log >> $GITHUB_ENV
-          echo "EOF" >> $GITHUB_ENV
+          terraform fmt -check -recursive 2>&1 | Out-File -FilePath fmt.log
+          $fmtLog = Get-Content -Path fmt.log -Raw
+          "FMT_LOG<<EOF" >> $env:GITHUB_ENV
+          $fmtLog >> $env:GITHUB_ENV
+          "EOF" >> $env:GITHUB_ENV
 
       - name: Terraform Plan
         id: plan
+        shell: pwsh
         run: |
-          terraform plan -no-color -detailed-exitcode -out=tfplan 2>&1 | tee plan.log
-          echo "PLAN_LOG<<EOF" >> $GITHUB_ENV
-          cat plan.log >> $GITHUB_ENV
-          echo "EOF" >> $GITHUB_ENV
+          terraform plan -no-color -detailed-exitcode -out=tfplan 2>&1 | Out-File -FilePath plan.log
+          $planLog = Get-Content -Path plan.log -Raw
+          "PLAN_LOG<<EOF" >> $env:GITHUB_ENV
+          $planLog >> $env:GITHUB_ENV
+          "EOF" >> $env:GITHUB_ENV
         continue-on-error: true
 
       - name: Update PR with Terraform Results
@@ -110,21 +116,25 @@ jobs:
 
       - name: Build with Gradle
         id: build
+        shell: pwsh
         run: |
           cd ./mod_source
-          ./gradlew build --info 2>&1 | tee build.log
-          echo "BUILD_LOG<<EOF" >> $GITHUB_ENV
-          cat build.log >> $GITHUB_ENV
-          echo "EOF" >> $GITHUB_ENV
+          ./gradlew build --info 2>&1 | Out-File -FilePath build.log
+          $buildLog = Get-Content -Path build.log -Raw
+          "BUILD_LOG<<EOF" >> $env:GITHUB_ENV
+          $buildLog >> $env:GITHUB_ENV
+          "EOF" >> $env:GITHUB_ENV
 
       - name: Run Tests
         id: test
+        shell: pwsh
         run: |
           cd ./mod_source
-          ./gradlew test --info 2>&1 | tee test.log
-          echo "TEST_LOG<<EOF" >> $GITHUB_ENV
-          cat test.log >> $GITHUB_ENV
-          echo "EOF" >> $GITHUB_ENV
+          ./gradlew test --info 2>&1 | Out-File -FilePath test.log
+          $testLog = Get-Content -Path test.log -Raw
+          "TEST_LOG<<EOF" >> $env:GITHUB_ENV
+          $testLog >> $env:GITHUB_ENV
+          "EOF" >> $env:GITHUB_ENV
 
       - name: Upload Build Artifact
         uses: actions/upload-artifact@v3.1.3
