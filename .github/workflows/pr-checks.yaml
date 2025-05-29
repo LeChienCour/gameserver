@@ -163,37 +163,20 @@ jobs:
         uses: actions/github-script@v7.0.1
         if: always()
         env:
-          INIT_LOG: ${{ env.INIT_LOG }}
-          FMT_LOG: ${{ env.FMT_LOG }}
-          PLAN_LOG: ${{ env.PLAN_LOG }}
-          APPLY_LOG: ${{ env.APPLY_LOG }}
+          PLAN_STATUS: ${{ steps.plan.outcome }}
+          APPLY_STATUS: ${{ steps.apply.outcome }}
+          INSTANCE_IP: ${{ steps.get_ip.outputs.instance_ip }}
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
-            const output = `### Terraform Execution Results 🔍
+            const status = process.env.APPLY_STATUS === 'success' ? '✅' : '❌';
+            const output = `### Infrastructure Deployment ${status}
             
-            #### Init Output
-            \`\`\`
-            ${process.env.INIT_LOG}
-            \`\`\`
+            **Resources Status:**
+            - Infrastructure Apply: ${process.env.APPLY_STATUS === 'success' ? '✅ Success' : '❌ Failed'}
+            ${process.env.INSTANCE_IP ? `- Instance IP: \`${process.env.INSTANCE_IP}\`` : ''}
             
-            #### Format Check
-            \`\`\`
-            ${process.env.FMT_LOG}
-            \`\`\`
-            
-            #### Plan Output
-            \`\`\`
-            ${process.env.PLAN_LOG}
-            \`\`\`
-
-            #### Test Deployment Output
-            \`\`\`
-            ${process.env.APPLY_LOG || 'Test deployment was not executed'}
-            \`\`\`
-            
-            *Workflow: [${context.workflow}](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})*
-            `;
+            ${process.env.APPLY_STATUS !== 'success' ? '⚠️ Check workflow logs for detailed error information.' : ''}`;
             
             await github.rest.pulls.createReview({
               owner: context.repo.owner,
@@ -232,20 +215,49 @@ jobs:
         run: |
           chmod +x ./mod_source/gradlew
 
-      - name: Build with Gradle
+      - name: Setup NeoForge Environment
+        run: |
+          cd ./mod_source
+          # Create gradle.properties if it doesn't exist
+          echo "org.gradle.jvmargs=-Xmx3G" > gradle.properties
+          echo "org.gradle.daemon=false" >> gradle.properties
+          
+          # Run NeoForge setup tasks
+          ./gradlew --no-daemon clean
+          ./gradlew --no-daemon setupDev --stacktrace --info
+          
+          # Print debug information
+          echo "Content of build directory:"
+          ls -la build/ || true
+          echo "Content of .gradle directory:"
+          ls -la .gradle/ || true
+
+      - name: Build Mod
         id: build
         run: |
           cd ./mod_source
-          ./gradlew clean build --info --stacktrace | tee build.log
+          ./gradlew --no-daemon build --stacktrace --info | tee build.log
+          
+          # Check if build generated any JARs
+          if [ -d "build/libs" ]; then
+            echo "Build output files:"
+            ls -la build/libs/
+          else
+            echo "No build/libs directory found!"
+            echo "Build directory contents:"
+            ls -la build/
+          fi
+          
           echo "BUILD_LOG<<EOF" >> $GITHUB_ENV
           cat build.log >> $GITHUB_ENV
           echo "EOF" >> $GITHUB_ENV
 
       - name: Run Tests
         id: test
+        if: success()
         run: |
           cd ./mod_source
-          ./gradlew test --info | tee test.log
+          ./gradlew --no-daemon test --stacktrace --info | tee test.log
           echo "TEST_LOG<<EOF" >> $GITHUB_ENV
           cat test.log >> $GITHUB_ENV
           echo "EOF" >> $GITHUB_ENV
@@ -261,37 +273,25 @@ jobs:
             !./mod_source/build/libs/*-javadoc.jar
           if-no-files-found: error
 
-      - name: Publish Test Results
-        uses: mikepenz/action-junit-report@v4.1.0
-        if: always()
-        with:
-          report_paths: '**/build/test-results/test/TEST-*.xml'
-          detailed_summary: true
-          include_passed: true
-
       - name: Update PR with Build Results
         uses: actions/github-script@v7.0.1
         if: always()
         env:
-          BUILD_LOG: ${{ env.BUILD_LOG }}
-          TEST_LOG: ${{ env.TEST_LOG }}
+          BUILD_STATUS: ${{ steps.build.outcome }}
+          TEST_STATUS: ${{ steps.test.outcome }}
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
-            const output = `### Mod Build Results 🛠️
+            const buildStatus = process.env.BUILD_STATUS === 'success' ? '✅' : '❌';
+            const testStatus = process.env.TEST_STATUS === 'success' ? '✅' : '❌';
             
-            #### Build Output
-            \`\`\`
-            ${process.env.BUILD_LOG}
-            \`\`\`
+            const output = `### Mod Build Status ${buildStatus}
+
+            **Build Steps:**
+            - Build: ${buildStatus}
+            - Tests: ${testStatus}
             
-            #### Test Output
-            \`\`\`
-            ${process.env.TEST_LOG}
-            \`\`\`
-            
-            *Workflow: [${context.workflow}](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})*
-            `;
+            ${process.env.BUILD_STATUS !== 'success' || process.env.TEST_STATUS !== 'success' ? '⚠️ Check workflow logs for detailed error information.' : ''}`;
             
             await github.rest.pulls.createReview({
               owner: context.repo.owner,
@@ -299,7 +299,7 @@ jobs:
               pull_number: context.issue.number,
               body: output,
               event: 'COMMENT'
-            }); 
+            });
 
   deploy_mod:
     needs: [build_mod, terraform_deploy]
@@ -577,14 +577,10 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
-            const status = '${{ job.status }}' === 'success' ? '✅ Success' : '❌ Failed';
+            const status = '${{ job.status }}' === 'success' ? '✅' : '❌';
             const message = `### Infrastructure Cleanup ${status}
             
-            ${status === '✅ Success' 
-              ? '- All resources have been destroyed\n- Terraform workspace has been cleaned up' 
-              : '- Cleanup encountered issues. Please check the workflow logs and clean up manually if needed'}
-            
-            *Workflow: [${context.workflow}](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})*`;
+            ${status === '✅' ? '- Resources successfully cleaned up' : '⚠️ Cleanup encountered issues - manual verification required'}`;
             
             await github.rest.issues.createComment({
               owner: context.repo.owner,
