@@ -38,13 +38,22 @@ jobs:
           PR_NUMBER=$(echo $GITHUB_REF | cut -d'/' -f3)
           WORKSPACE="pr-${PR_NUMBER}"
           echo "Using workspace: $WORKSPACE"
-          $TERRAFORM_CLI_PATH/terraform workspace new $WORKSPACE || $TERRAFORM_CLI_PATH/terraform workspace select $WORKSPACE
           echo "workspace=$WORKSPACE" >> $GITHUB_OUTPUT
 
-      - name: Terraform Init
+      - name: Terraform Init with Backend Config
         id: init
         run: |
-          $TERRAFORM_CLI_PATH/terraform init 2>&1 | tee init.log
+          # Initialize with backend configuration
+          terraform init \
+            -backend-config="bucket=${{ secrets.TF_STATE_BUCKET }}" \
+            -backend-config="key=pr-environments/terraform.tfstate" \
+            -backend-config="region=us-east-1" \
+            -backend-config="dynamodb_table=${{ secrets.TF_LOCK_TABLE }}" \
+            -reconfigure 2>&1 | tee init.log
+
+          # Create or select workspace
+          terraform workspace select ${{ steps.workspace.outputs.workspace }} 2>/dev/null || terraform workspace new ${{ steps.workspace.outputs.workspace }}
+
           echo "INIT_LOG<<EOF" >> $GITHUB_ENV
           cat init.log >> $GITHUB_ENV
           echo "EOF" >> $GITHUB_ENV
@@ -52,7 +61,7 @@ jobs:
       - name: Terraform Format Check
         id: fmt
         run: |
-          $TERRAFORM_CLI_PATH/terraform fmt -check -recursive 2>&1 | tee fmt.log
+          terraform fmt -check -recursive 2>&1 | tee fmt.log
           echo "FMT_LOG<<EOF" >> $GITHUB_ENV
           cat fmt.log >> $GITHUB_ENV
           echo "EOF" >> $GITHUB_ENV
@@ -62,7 +71,7 @@ jobs:
         env:
           TF_WORKSPACE: ${{ steps.workspace.outputs.workspace }}
         run: |
-          $TERRAFORM_CLI_PATH/terraform plan -no-color -detailed-exitcode -out=tfplan 2>&1 | tee plan.log
+          terraform plan -no-color -detailed-exitcode -out=tfplan 2>&1 | tee plan.log
           echo "PLAN_LOG<<EOF" >> $GITHUB_ENV
           cat plan.log >> $GITHUB_ENV
           echo "EOF" >> $GITHUB_ENV
@@ -75,7 +84,7 @@ jobs:
           TF_WORKSPACE: ${{ steps.workspace.outputs.workspace }}
         run: |
           echo "🚀 Applying test infrastructure changes in workspace: $TF_WORKSPACE"
-          $TERRAFORM_CLI_PATH/terraform apply -auto-approve tfplan 2>&1 | tee apply.log
+          terraform apply -auto-approve tfplan 2>&1 | tee apply.log
           echo "APPLY_LOG<<EOF" >> $GITHUB_ENV
           cat apply.log >> $GITHUB_ENV
           echo "EOF" >> $GITHUB_ENV
@@ -130,7 +139,7 @@ jobs:
           TF_WORKSPACE: ${{ steps.workspace.outputs.workspace }}
         run: |
           echo "🧹 Cleaning up test infrastructure in workspace: $TF_WORKSPACE"
-          $TERRAFORM_CLI_PATH/terraform destroy -auto-approve 2>&1 | tee destroy.log
+          terraform destroy -auto-approve 2>&1 | tee destroy.log
 
       - name: Terraform Plan Status
         if: steps.plan.outcome == 'failure'
@@ -459,12 +468,38 @@ jobs:
         with:
           terraform_version: 1.12.1
 
-      - name: Terraform Init
-        run: terraform init
+      - name: Get Workspace Name
+        id: workspace
+        run: |
+          PR_NUMBER=$(echo $GITHUB_REF | cut -d'/' -f3)
+          WORKSPACE="pr-${PR_NUMBER}"
+          echo "workspace=$WORKSPACE" >> $GITHUB_OUTPUT
+
+      - name: Terraform Init with Backend Config
+        run: |
+          # Initialize with backend configuration
+          terraform init \
+            -backend-config="bucket=${{ secrets.TF_STATE_BUCKET }}" \
+            -backend-config="key=pr-environments/terraform.tfstate" \
+            -backend-config="region=us-east-1" \
+            -backend-config="dynamodb_table=${{ secrets.TF_LOCK_TABLE }}" \
+            -reconfigure
+
+          # Select workspace
+          terraform workspace select ${{ steps.workspace.outputs.workspace }}
 
       - name: Destroy Infrastructure
         if: needs.deploy_mod.outputs.deployment_status == 'success' || needs.deploy_mod.result == 'failure'
+        env:
+          TF_WORKSPACE: ${{ steps.workspace.outputs.workspace }}
         run: |
-          echo "🧹 Cleaning up infrastructure..."
+          echo "🧹 Cleaning up infrastructure in workspace: $TF_WORKSPACE"
           terraform destroy -auto-approve
           echo "✅ Cleanup completed"
+
+      - name: Delete Workspace
+        if: always()
+        run: |
+          echo "🗑️ Deleting workspace: ${{ steps.workspace.outputs.workspace }}"
+          terraform workspace select default
+          terraform workspace delete ${{ steps.workspace.outputs.workspace }}
