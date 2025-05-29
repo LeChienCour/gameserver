@@ -33,20 +33,25 @@ jobs:
           terraform_version: 1.12.1
 
       - name: Validate Required Secrets
+        env:
+          TF_STATE_BUCKET: ${{ secrets.TF_STATE_BUCKET }}
+          TF_LOCK_TABLE: ${{ secrets.TF_LOCK_TABLE }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
         run: |
-          if [ -z "${{ secrets.TF_STATE_BUCKET }}" ]; then
+          if [ -z "$TF_STATE_BUCKET" ]; then
             echo "::error::TF_STATE_BUCKET secret is not set"
             exit 1
           fi
-          if [ -z "${{ secrets.TF_LOCK_TABLE }}" ]; then
+          if [ -z "$TF_LOCK_TABLE" ]; then
             echo "::error::TF_LOCK_TABLE secret is not set"
             exit 1
           fi
-          if [ -z "${{ secrets.AWS_ACCESS_KEY_ID }}" ]; then
+          if [ -z "$AWS_ACCESS_KEY_ID" ]; then
             echo "::error::AWS_ACCESS_KEY_ID secret is not set"
             exit 1
           fi
-          if [ -z "${{ secrets.AWS_SECRET_ACCESS_KEY }}" ]; then
+          if [ -z "$AWS_SECRET_ACCESS_KEY" ]; then
             echo "::error::AWS_SECRET_ACCESS_KEY secret is not set"
             exit 1
           fi
@@ -61,12 +66,15 @@ jobs:
           echo "workspace=$WORKSPACE" >> $GITHUB_OUTPUT
 
       - name: Create Backend Config File
+        env:
+          TF_STATE_BUCKET: ${{ secrets.TF_STATE_BUCKET }}
+          TF_LOCK_TABLE: ${{ secrets.TF_LOCK_TABLE }}
         run: |
           cat > backend.hcl << EOF
-          bucket         = "${{ secrets.TF_STATE_BUCKET }}"
+          bucket         = "$TF_STATE_BUCKET"
           key            = "pr-environments/${{ steps.workspace.outputs.workspace }}/terraform.tfstate"
           region         = "us-east-1"
-          dynamodb_table = "${{ secrets.TF_LOCK_TABLE }}"
+          dynamodb_table = "$TF_LOCK_TABLE"
           encrypt        = true
           use_lockfile   = true
           EOF
