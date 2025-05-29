@@ -7,7 +7,7 @@ on:
 
 jobs:
   terraform_plan:
-    runs-on: windows-latest
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4.1.1
 
@@ -25,33 +25,27 @@ jobs:
 
       - name: Terraform Init
         id: init
-        shell: pwsh
         run: |
-          terraform init 2>&1 | Out-File -FilePath init.log
-          $initLog = Get-Content -Path init.log -Raw
-          "INIT_LOG<<EOF" >> $env:GITHUB_ENV
-          $initLog >> $env:GITHUB_ENV
-          "EOF" >> $env:GITHUB_ENV
+          $TERRAFORM_CLI_PATH/terraform init 2>&1 | tee init.log
+          echo "INIT_LOG<<EOF" >> $GITHUB_ENV
+          cat init.log >> $GITHUB_ENV
+          echo "EOF" >> $GITHUB_ENV
 
       - name: Terraform Format Check
         id: fmt
-        shell: pwsh
         run: |
-          terraform fmt -check -recursive 2>&1 | Out-File -FilePath fmt.log
-          $fmtLog = Get-Content -Path fmt.log -Raw
-          "FMT_LOG<<EOF" >> $env:GITHUB_ENV
-          $fmtLog >> $env:GITHUB_ENV
-          "EOF" >> $env:GITHUB_ENV
+          $TERRAFORM_CLI_PATH/terraform fmt -check -recursive 2>&1 | tee fmt.log
+          echo "FMT_LOG<<EOF" >> $GITHUB_ENV
+          cat fmt.log >> $GITHUB_ENV
+          echo "EOF" >> $GITHUB_ENV
 
       - name: Terraform Plan
         id: plan
-        shell: pwsh
         run: |
-          terraform plan -no-color -detailed-exitcode -out=tfplan 2>&1 | Out-File -FilePath plan.log
-          $planLog = Get-Content -Path plan.log -Raw
-          "PLAN_LOG<<EOF" >> $env:GITHUB_ENV
-          $planLog >> $env:GITHUB_ENV
-          "EOF" >> $env:GITHUB_ENV
+          $TERRAFORM_CLI_PATH/terraform plan -no-color -detailed-exitcode -out=tfplan 2>&1 | tee plan.log
+          echo "PLAN_LOG<<EOF" >> $GITHUB_ENV
+          cat plan.log >> $GITHUB_ENV
+          echo "EOF" >> $GITHUB_ENV
         continue-on-error: true
 
       - name: Update PR with Terraform Results
