@@ -69,6 +69,7 @@ jobs:
         with:
           repository: LeChienCour/VoiceChatMod
           path: ./mod_source
+          ref: main
       
       - uses: actions/setup-java@v3.13.0
         with:
