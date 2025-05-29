@@ -205,19 +205,6 @@ jobs:
           ref: main
           fetch-depth: 0
 
-      - name: Verify Repository Content
-        run: |
-          cd ./mod_source
-          echo "Repository contents:"
-          ls -la
-          
-          if [ ! -f "gradle.properties" ] || [ ! -f "build.gradle" ]; then
-            echo "❌ Missing required Gradle configuration files!"
-            exit 1
-          fi
-          
-          echo "✅ Required Gradle files found"
-
       - name: Set up JDK 17
         uses: actions/setup-java@v3.13.0
         with:
@@ -225,46 +212,29 @@ jobs:
           distribution: 'temurin'
           cache: gradle
 
+      - name: Setup Gradle
+        uses: gradle/gradle-build-action@v2.11.1
+        with:
+          gradle-version: 8.14
+          gradle-home-cache-cleanup: true
+
       - name: Grant execute permission for gradlew
         run: |
           chmod +x ./mod_source/gradlew
 
-      - name: Setup NeoForge Environment
-        run: |
-          cd ./mod_source
-          # Create gradle.properties if it doesn't exist
-          echo "org.gradle.jvmargs=-Xmx3G" > gradle.properties
-          echo "org.gradle.daemon=false" >> gradle.properties
-          
-          # Run NeoForge setup tasks
-          ./gradlew --no-daemon clean
-          ./gradlew --no-daemon setupDev --stacktrace --info
-          
-          # Print debug information
-          echo "Content of build directory:"
-          ls -la build/ || true
-          echo "Content of .gradle directory:"
-          ls -la .gradle/ || true
-
       - name: Build Mod
         id: build
+        working-directory: ./mod_source
         run: |
-          cd ./mod_source
-          ./gradlew --no-daemon build --stacktrace --info | tee build.log
+          # Print working directory and files
+          pwd
+          ls -la
           
-          # Check if build generated any JARs
-          if [ -d "build/libs" ]; then
-            echo "Build output files:"
-            ls -la build/libs/
-          else
-            echo "No build/libs directory found!"
-            echo "Build directory contents:"
-            ls -la build/
-          fi
+          # Print Gradle project info
+          gradle properties --no-daemon | grep "mod_version" || echo "mod_version not found in properties"
           
-          echo "BUILD_LOG<<EOF" >> $GITHUB_ENV
-          cat build.log >> $GITHUB_ENV
-          echo "EOF" >> $GITHUB_ENV
+          # Try building with explicit project directory
+          gradle build --project-dir . --stacktrace --info
 
       - name: Run Tests
         id: test
