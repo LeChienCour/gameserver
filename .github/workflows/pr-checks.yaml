@@ -217,6 +217,7 @@ jobs:
         with:
           gradle-version: 8.14
           gradle-home-cache-cleanup: true
+          cache-read-only: false
 
       - name: Grant execute permission for gradlew
         run: |
@@ -226,15 +227,52 @@ jobs:
         id: build
         working-directory: ./mod_source
         run: |
-          # Print working directory and files
-          pwd
+          # Verify Gradle version
+          gradle --version
+          
+          # Clean before build
+          gradle clean
+          
+          # Build with explicit configuration
+          gradle build \
+            --no-daemon \
+            --project-dir . \
+            --stacktrace \
+            --info \
+            -Pmod_version=0.0.1
+          
+          # Show build results
+          echo "Build complete. Checking results..."
+          echo "Project structure after build:"
           ls -la
           
-          # Print Gradle project info
-          gradle properties --no-daemon | grep "mod_version" || echo "mod_version not found in properties"
+          if [ -d "build/libs" ]; then
+            echo "Build artifacts created:"
+            ls -la build/libs/
+          else
+            echo "Error: No build/libs directory found after build!"
+            echo "Contents of build directory:"
+            ls -la build/
+            exit 1
+          fi
+
+      - name: Debug Build Output
+        if: always()
+        working-directory: ./mod_source
+        run: |
+          echo "Current working directory: $(pwd)"
+          echo "Directory structure:"
+          ls -R
           
-          # Try building with explicit project directory
-          gradle build --project-dir . --stacktrace --info
+          echo "Checking build/libs directory:"
+          if [ -d "build/libs" ]; then
+            echo "Contents of build/libs:"
+            ls -la build/libs/
+          else
+            echo "build/libs directory not found!"
+            echo "Contents of build directory (if exists):"
+            ls -la build/ || echo "No build directory found"
+          fi
 
       - name: Run Tests
         id: test
@@ -251,11 +289,44 @@ jobs:
         if: success()
         with:
           name: mod-jar
-          path: |
-            ./mod_source/build/libs/*.jar
-            !./mod_source/build/libs/*-sources.jar
-            !./mod_source/build/libs/*-javadoc.jar
+          path: mod_source/build/libs/
           if-no-files-found: error
+          retention-days: 5
+
+      - name: Upload to S3
+        if: success()
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          ATTEMPT_NUMBER: ${{ github.run_attempt }}
+        run: |
+          # Find the main jar file (excluding sources and javadoc)
+          JAR_FILE=$(find mod_source/build/libs/ -name "*.jar" ! -name "*-sources.jar" ! -name "*-javadoc.jar")
+          
+          if [ -z "$JAR_FILE" ]; then
+            echo "❌ No jar file found to upload"
+            exit 1
+          fi
+          
+          # Extract just the filename
+          FILENAME=$(basename "$JAR_FILE")
+          
+          # Create S3 path with PR and attempt numbers
+          S3_PATH="pr-${PR_NUMBER}/attempt-${ATTEMPT_NUMBER}/${FILENAME}"
+          
+          echo "📦 Uploading $FILENAME to S3..."
+          echo "🎯 Target: s3://voice-chat-mod-minecraft-1.21.4/$S3_PATH"
+          
+          # Upload to S3
+          aws s3 cp "$JAR_FILE" "s3://voice-chat-mod-minecraft-1.21.4/$S3_PATH"
+          
+          # Verify upload
+          if aws s3 ls "s3://voice-chat-mod-minecraft-1.21.4/$S3_PATH" > /dev/null 2>&1; then
+            echo "✅ Upload successful"
+            echo "s3_artifact_path=$S3_PATH" >> $GITHUB_ENV
+          else
+            echo "❌ Upload failed"
+            exit 1
+          fi
 
       - name: Update PR with Build Results
         uses: actions/github-script@v7.0.1
