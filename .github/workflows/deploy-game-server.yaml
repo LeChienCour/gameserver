@@ -12,15 +12,15 @@ jobs:
       instance_ip: ${{ steps.terraform_apply.outputs.instance_ip }}
       user_pool_id: ${{ steps.terraform_apply.outputs.user_pool_client_id }}
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4.1.1
       
-      - uses: aws-actions/configure-aws-credentials@v2
+      - uses: aws-actions/configure-aws-credentials@v4.0.2
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: us-east-1
       
-      - uses: hashicorp/setup-terraform@v2
+      - uses: hashicorp/setup-terraform@v3.0.0
         with:
           terraform_version: 1.5.7
       
@@ -58,12 +58,12 @@ jobs:
     outputs:
       mod_path: ${{ github.workspace }}/mod_source/build/libs/voicechatmod-1.0.jar
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4.1.1
         with:
           repository: LeChienCour/VoiceChatMod
           path: ./mod_source
       
-      - uses: actions/setup-java@v3
+      - uses: actions/setup-java@v3.13.0
         with:
           java-version: '17'
           distribution: 'adoptium'
@@ -89,7 +89,7 @@ jobs:
           ls -la build/libs/
           echo "::endgroup::"
       
-      - uses: actions/upload-artifact@v3
+      - uses: actions/upload-artifact@v3.1.3
         with:
           name: mod-jar
           path: ./mod_source/build/libs/*.jar
@@ -105,7 +105,7 @@ jobs:
           sleep 60
       
       - name: Deploy and Configure Server
-        uses: appleboy/ssh-action@v0.1.10
+        uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ needs.terraform_deploy.outputs.instance_ip }}
           username: ubuntu
@@ -148,7 +148,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Verify Deployment
-        uses: appleboy/ssh-action@v0.1.10
+        uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ needs.terraform_deploy.outputs.instance_ip }}
           username: ubuntu
@@ -179,21 +179,8 @@ jobs:
               echo "::endgroup::"
             } 2>&1 | tee verification.log
 
-      - name: Create Deployment Summary
+      - uses: actions/upload-artifact@v3.1.3
         if: always()
-        run: |
-          echo "## Deployment Status Summary" > deployment_summary.md
-          echo "### Infrastructure" >> deployment_summary.md
-          echo "- Instance IP: ${{ needs.terraform_deploy.outputs.instance_ip }}" >> deployment_summary.md
-          echo "- User Pool ID: ${{ needs.terraform_deploy.outputs.user_pool_id }}" >> deployment_summary.md
-          echo "### Verification Results" >> deployment_summary.md
-          echo "\`\`\`" >> deployment_summary.md
-          cat verification.log >> deployment_summary.md
-          echo "\`\`\`" >> deployment_summary.md
-          
-      - name: Upload Deployment Summary
-        if: always()
-        uses: actions/upload-artifact@v3
         with:
           name: deployment-summary
-          path: deployment_summary.md
+          path: verification.log
