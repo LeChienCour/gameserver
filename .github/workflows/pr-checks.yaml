@@ -5,6 +5,12 @@ on:
     branches:
       - main
 
+# Add permissions block
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
 jobs:
   terraform_plan:
     runs-on: ubuntu-latest
@@ -78,12 +84,13 @@ jobs:
             *Workflow: [${context.workflow}](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})*
             `;
             
-            github.rest.issues.createComment({
-              issue_number: context.issue.number,
+            await github.rest.pulls.createReview({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              body: output
-            })
+              pull_number: context.issue.number,
+              body: output,
+              event: 'COMMENT'
+            });
 
       - name: Terraform Plan Status
         if: steps.plan.outcome == 'failure'
@@ -168,9 +175,10 @@ jobs:
             *Workflow: [${context.workflow}](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})*
             `;
             
-            github.rest.issues.createComment({
-              issue_number: context.issue.number,
+            await github.rest.pulls.createReview({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              body: output
-            }) 
+              pull_number: context.issue.number,
+              body: output,
+              event: 'COMMENT'
+            }); 

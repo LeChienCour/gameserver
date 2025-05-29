@@ -5,6 +5,13 @@ on:
     branches: [main]
   workflow_dispatch:
 
+# Add permissions block
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+  id-token: write
+
 jobs:
   terraform_deploy:
     runs-on: ubuntu-latest
