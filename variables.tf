@@ -59,9 +59,9 @@ variable "user_pool_name" {
 
 # EC2 Instance Configuration
 variable "ami_id" {
-  description = "AMI ID for the EC2 instance"
+  description = "AMI ID for the EC2 instance (optional, will use latest Amazon Linux 2 if not specified)"
   type        = string
-  default     = "ami-0c7217cdde317cfec"  # Ubuntu 22.04 LTS
+  default     = null
 }
 
 variable "instance_type" {

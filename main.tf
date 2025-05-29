@@ -22,6 +22,22 @@ provider "aws" {
 # Data Sources
 data "aws_caller_identity" "current" {}
 
+# Find latest Amazon Linux 2 AMI
+data "aws_ami" "amazon_linux_2" {
+  most_recent = true
+  owners      = ["amazon"]
+
+  filter {
+    name   = "name"
+    values = ["amzn2-ami-hvm-*-x86_64-gp2"]
+  }
+
+  filter {
+    name   = "virtualization-type"
+    values = ["hvm"]
+  }
+}
+
 # API Gateway Module
 module "api_gateway" {
   source = "./modules/api_gateway"
@@ -64,7 +80,7 @@ resource "aws_dynamodb_table" "websocket_connections" {
 # EC2 Module
 module "ec2_game_server" {
   source            = "./modules/ec2"
-  ami_id            = var.ami_id
+  ami_id            = var.ami_id != null ? var.ami_id : data.aws_ami.amazon_linux_2.id
   instance_type     = var.instance_type
   subnet_id         = module.vpc.public_subnets_ids[0]
   security_group_id = module.security_groups.game_server_sg_id

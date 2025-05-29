@@ -69,6 +69,7 @@ output "game_server_connection_info" {
   description = "Game server connection information"
   value = {
     instance_id   = module.ec2_game_server.instance_id
+    public_ip     = module.ec2_game_server.instance_public_ip
     game_port     = var.game_port
     websocket_url = module.api_gateway.api_endpoint
   }
@@ -77,11 +78,6 @@ output "game_server_connection_info" {
 output "game_server_private_ip" {
   description = "Private IP address of the game server"
   value       = module.ec2_game_server.instance_private_ip
-}
-
-output "game_server_public_ip" {
-  description = "Public IP address of the game server"
-  value       = module.ec2_game_server.game_server_public_ip
 }
 
 output "game_server_security_group_id" {
@@ -228,4 +224,21 @@ output "public_subnets" {
 output "vpc_id" {
   description = "The ID of the VPC"
   value       = module.vpc.vpc_id
+}
+
+# EC2 Instance Outputs
+output "instance_public_ip" {
+  description = "The public IP address of the game server instance"
+  value       = module.ec2_game_server.instance_public_ip
+}
+
+# Other useful outputs
+output "api_endpoint" {
+  description = "The WebSocket API endpoint URL"
+  value       = module.api_gateway.api_endpoint
+}
+
+output "cognito_app_client_id" {
+  description = "The ID of the Cognito User Pool Client"
+  value       = module.cognito.user_pool_client_id
 }
