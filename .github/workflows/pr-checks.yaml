@@ -32,6 +32,26 @@ jobs:
         with:
           terraform_version: 1.12.1
 
+      - name: Validate Required Secrets
+        run: |
+          if [ -z "${{ secrets.TF_STATE_BUCKET }}" ]; then
+            echo "::error::TF_STATE_BUCKET secret is not set"
+            exit 1
+          fi
+          if [ -z "${{ secrets.TF_LOCK_TABLE }}" ]; then
+            echo "::error::TF_LOCK_TABLE secret is not set"
+            exit 1
+          fi
+          if [ -z "${{ secrets.AWS_ACCESS_KEY_ID }}" ]; then
+            echo "::error::AWS_ACCESS_KEY_ID secret is not set"
+            exit 1
+          fi
+          if [ -z "${{ secrets.AWS_SECRET_ACCESS_KEY }}" ]; then
+            echo "::error::AWS_SECRET_ACCESS_KEY secret is not set"
+            exit 1
+          fi
+          echo "All required secrets are set"
+
       - name: Configure PR Test Workspace
         id: workspace
         run: |
@@ -40,19 +60,37 @@ jobs:
           echo "Using workspace: $WORKSPACE"
           echo "workspace=$WORKSPACE" >> $GITHUB_OUTPUT
 
+      - name: Create Backend Config File
+        run: |
+          cat > backend.hcl << EOF
+          bucket         = "${{ secrets.TF_STATE_BUCKET }}"
+          key            = "pr-environments/${{ steps.workspace.outputs.workspace }}/terraform.tfstate"
+          region         = "us-east-1"
+          dynamodb_table = "${{ secrets.TF_LOCK_TABLE }}"
+          encrypt        = true
+          use_lockfile   = true
+          EOF
+          
+          echo "Generated backend configuration:"
+          cat backend.hcl
+
       - name: Terraform Init with Backend Config
         id: init
         run: |
-          # Initialize with backend configuration
-          terraform init \
-            -backend-config="bucket=${{ secrets.TF_STATE_BUCKET }}" \
-            -backend-config="key=pr-environments/terraform.tfstate" \
-            -backend-config="region=us-east-1" \
-            -backend-config="dynamodb_table=${{ secrets.TF_LOCK_TABLE }}" \
-            -reconfigure 2>&1 | tee init.log
+          # Initialize with backend configuration file
+          terraform init -backend-config=backend.hcl -reconfigure 2>&1 | tee init.log
+
+          # Check if init was successful
+          if [ $? -ne 0 ]; then
+            echo "::error::Terraform init failed"
+            exit 1
+          fi
 
           # Create or select workspace
-          terraform workspace select ${{ steps.workspace.outputs.workspace }} 2>/dev/null || terraform workspace new ${{ steps.workspace.outputs.workspace }}
+          if ! terraform workspace select ${{ steps.workspace.outputs.workspace }} 2>/dev/null; then
+            echo "Creating new workspace: ${{ steps.workspace.outputs.workspace }}"
+            terraform workspace new ${{ steps.workspace.outputs.workspace }}
+          fi
 
           echo "INIT_LOG<<EOF" >> $GITHUB_ENV
           cat init.log >> $GITHUB_ENV
@@ -483,6 +521,8 @@ jobs:
             -backend-config="key=pr-environments/terraform.tfstate" \
             -backend-config="region=us-east-1" \
             -backend-config="dynamodb_table=${{ secrets.TF_LOCK_TABLE }}" \
+            -backend-config="encrypt=true" \
+            -backend-config="use_lockfile=true" \
             -reconfigure
 
           # Select workspace
