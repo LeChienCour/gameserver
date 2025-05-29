@@ -203,6 +203,20 @@ jobs:
           repository: LeChienCour/VoiceChatMod
           path: ./mod_source
           ref: main
+          fetch-depth: 0
+
+      - name: Verify Repository Content
+        run: |
+          cd ./mod_source
+          echo "Repository contents:"
+          ls -la
+          
+          if [ ! -f "gradle.properties" ] || [ ! -f "build.gradle" ]; then
+            echo "❌ Missing required Gradle configuration files!"
+            exit 1
+          fi
+          
+          echo "✅ Required Gradle files found"
 
       - name: Set up JDK 17
         uses: actions/setup-java@v3.13.0
