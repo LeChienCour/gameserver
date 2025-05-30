@@ -206,12 +206,48 @@ jobs:
           ref: main
           fetch-depth: 0
 
+      - name: Configure PR Test Workspace
+        id: workspace
+        run: |
+          PR_NUMBER=$(echo $GITHUB_REF | cut -d'/' -f3)
+          WORKSPACE="pr-${PR_NUMBER}"
+          echo "Using workspace: $WORKSPACE"
+          echo "workspace=$WORKSPACE" >> $GITHUB_OUTPUT
+
+      - name: Set up AWS CLI
+        uses: aws-actions/configure-aws-credentials@v4.0.2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+
       - name: Set up JDK 17
         uses: actions/setup-java@v3.13.0
         with:
           java-version: '17'
           distribution: 'temurin'
           cache: 'gradle'
+
+      - name: Get SSH Key from SSM
+        id: get_ssh_key
+        env:
+          WORKSPACE: ${{ steps.workspace.outputs.workspace }}
+        run: |
+          if [ -z "$WORKSPACE" ]; then
+            echo "Error: Workspace variable is not set"
+            exit 1
+          fi
+          
+          echo "Retrieving SSH key for workspace: $WORKSPACE"
+          SSH_KEY=$(aws ssm get-parameter \
+            --name "/minecraft/${WORKSPACE}/ssh_private_key" \
+            --with-decryption \
+            --query 'Parameter.Value' \
+            --output text)
+          echo "::add-mask::$SSH_KEY"
+          echo "ssh_key<<EOF" >> $GITHUB_OUTPUT
+          echo "$SSH_KEY" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
 
       - name: Build and Test Mod
         id: build
@@ -247,23 +283,6 @@ jobs:
           useSystemDefaultMic = true
           microphoneBoost = 1.0
           EOF
-
-      - name: Get SSH Key from SSM
-        id: get_ssh_key
-        env:
-          AWS_REGION: us-east-1
-          WORKSPACE: ${{ steps.workspace.outputs.workspace }}
-        run: |
-          SSH_KEY=$(aws ssm get-parameter \
-            --region ${AWS_REGION} \
-            --name "/minecraft/${WORKSPACE}/ssh_private_key" \
-            --with-decryption \
-            --query 'Parameter.Value' \
-            --output text)
-          echo "::add-mask::$SSH_KEY"
-          echo "ssh_key<<EOF" >> $GITHUB_OUTPUT
-          echo "$SSH_KEY" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
 
       - name: Deploy to Server
         if: success()
