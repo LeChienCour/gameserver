@@ -197,6 +197,9 @@ jobs:
       pull-requests: write  # For commenting results
       checks: write        # For test results
       actions: read        # For artifacts
+    outputs:
+      build_status: ${{ steps.build.outcome }}
+      test_status: ${{ steps.test.outcome }}
     steps:
       - uses: actions/checkout@v4.1.1
         with:
@@ -250,33 +253,13 @@ jobs:
             exit 1
           fi
 
-      - name: Debug Build Output
-        if: always()
-        working-directory: ./mod_source
-        run: |
-          echo "Current working directory: $(pwd)"
-          echo "Directory structure:"
-          ls -R
-          
-          echo "Checking build/libs directory:"
-          if [ -d "build/libs" ]; then
-            echo "Contents of build/libs:"
-            ls -la build/libs/
-          else
-            echo "build/libs directory not found!"
-            echo "Contents of build directory (if exists):"
-            ls -la build/ || echo "No build directory found"
-          fi
-
       - name: Run Tests
         id: test
         if: success()
         run: |
           cd ./mod_source
-          ./gradlew --no-daemon test --stacktrace --info | tee test.log
-          echo "TEST_LOG<<EOF" >> $GITHUB_ENV
-          cat test.log >> $GITHUB_ENV
-          echo "EOF" >> $GITHUB_ENV
+          ./gradlew --no-daemon test --stacktrace --info > test_output.log 2>&1
+          echo "Test execution completed"
 
       - name: Update PR with Build Results
         uses: actions/github-script@v7.0.1
@@ -290,11 +273,24 @@ jobs:
             const buildStatus = process.env.BUILD_STATUS === 'success' ? '✅' : '❌';
             const testStatus = process.env.TEST_STATUS === 'success' ? '✅' : '❌';
             
+            let testDetails = '';
+            if (process.env.TEST_STATUS === 'failure') {
+              const fs = require('fs');
+              try {
+                const log = fs.readFileSync('mod_source/test_output.log', 'utf8');
+                // Get last 500 characters of log if it failed
+                testDetails = '\n\nTest Output (last 500 chars):\n```\n' + 
+                  log.slice(-500) + '\n```';
+              } catch (error) {
+                testDetails = '\n\nError reading test log: ' + error.message;
+              }
+            }
+            
             const output = `### Mod Build Status ${buildStatus}
 
             **Build Steps:**
             - Build: ${buildStatus}
-            - Tests: ${testStatus}
+            - Tests: ${testStatus}${testDetails}
             
             ${process.env.BUILD_STATUS !== 'success' || process.env.TEST_STATUS !== 'success' ? '⚠️ Check workflow logs for detailed error information.' : ''}`;
             
@@ -308,6 +304,7 @@ jobs:
 
   deploy_mod:
     needs: [build_mod, terraform_deploy]
+    if: needs.build_mod.outputs.build_status == 'success' && needs.build_mod.outputs.test_status == 'success'
     runs-on: ubuntu-latest
     permissions:
       contents: read        # For checkout
@@ -494,7 +491,8 @@ jobs:
       (
         github.event.action == 'closed' || 
         needs.terraform_deploy.result == 'failure' ||
-        needs.build_mod.result == 'failure' ||
+        needs.build_mod.outputs.build_status == 'failure' ||
+        needs.build_mod.outputs.test_status == 'failure' ||
         needs.deploy_mod.result == 'failure'
       )
     runs-on: ubuntu-latest
