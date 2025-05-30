@@ -317,13 +317,25 @@ jobs:
               --query 'Parameter.Value' \
               --output text 2>/dev/null); then
               
+              echo "Retrieved key from SSM (first 50 chars):"
+              echo "${SSH_KEY:0:50}..."
+              
               # Create temporary file to validate key
               TEMP_KEY_FILE=$(mktemp)
               echo "$SSH_KEY" > "$TEMP_KEY_FILE"
               chmod 600 "$TEMP_KEY_FILE"
               
-              # Validate key format
-              if ! ssh-keygen -l -f "$TEMP_KEY_FILE" &>/dev/null; then
+              echo "Key file contents (first line):"
+              head -n 1 "$TEMP_KEY_FILE"
+              
+              echo "Key file permissions:"
+              ls -l "$TEMP_KEY_FILE"
+              
+              # Validate key format and print info
+              echo "Key information:"
+              if ssh-keygen -l -f "$TEMP_KEY_FILE"; then
+                echo "Key validation successful"
+              else
                 echo "::error::Invalid SSH key format"
                 shred -u "$TEMP_KEY_FILE"
                 exit 1
@@ -335,9 +347,18 @@ jobs:
               # Store key with proper line endings
               {
                 echo "ssh_key<<EOF"
-                echo "$SSH_KEY" | sed 's/\\n/\n/g' # Replace literal \n with newlines
+                # First ensure we have literal newlines
+                echo "$SSH_KEY" | sed 's/\\n/\n/g' | sed 's/\\r//g' > key_temp
+                cat key_temp
                 echo "EOF"
               } >> "$GITHUB_OUTPUT"
+              
+              # Debug: Show how many lines the key has
+              echo "Number of lines in processed key:"
+              wc -l < key_temp
+              
+              # Clean up
+              shred -u key_temp
               
               echo "Successfully retrieved and validated SSH key"
               break
@@ -355,6 +376,28 @@ jobs:
             ATTEMPT=$((ATTEMPT + 1))
           done
 
+      - name: Debug SSH Connection
+        if: always()
+        env:
+          SSH_KEY: ${{ steps.get_ssh_key.outputs.ssh_key }}
+          HOST: ${{ needs.terraform_deploy.outputs.instance_ip }}
+        run: |
+          # Create debug SSH config
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          TEMP_KEY_FILE=$(mktemp)
+          echo "$SSH_KEY" > "$TEMP_KEY_FILE"
+          chmod 600 "$TEMP_KEY_FILE"
+          
+          echo "Testing SSH connection with verbose output..."
+          ssh -v -o StrictHostKeyChecking=no -i "$TEMP_KEY_FILE" ubuntu@$HOST echo "Test connection" || true
+          
+          echo "Key file information:"
+          ssh-keygen -l -f "$TEMP_KEY_FILE" || true
+          
+          # Clean up
+          shred -u "$TEMP_KEY_FILE"
+
       - name: Deploy and Verify
         id: deploy
         uses: appleboy/ssh-action@v1.0.3
@@ -363,6 +406,7 @@ jobs:
           username: ubuntu
           key: ${{ steps.get_ssh_key.outputs.ssh_key }}
           port: 22
+          debug: true
           script: |
             set -e
             
