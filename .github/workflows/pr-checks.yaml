@@ -334,14 +334,14 @@ jobs:
           echo "Starting deployment using AWS Systems Manager..."
           
           # Ensure script has Unix line endings
-          sed -i 's/\r$//' scripts/deploy.sh
-          chmod +x scripts/deploy.sh
+          sed -i 's/\r$//' .github/scripts/deploy.sh
           
           # Run command through Session Manager
+          SCRIPT_CONTENT=$(cat .github/scripts/deploy.sh)
           aws ssm send-command \
             --instance-ids "$INSTANCE_ID" \
             --document-name "AWS-RunShellScript" \
-            --parameters commands="[\"$(cat scripts/deploy.sh)\"]" \
+            --parameters "commands=[\"$SCRIPT_CONTENT\"]" \
             --output text \
             --query "Command.CommandId" > command_id.txt
           

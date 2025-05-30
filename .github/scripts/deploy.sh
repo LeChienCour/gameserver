@@ -17,63 +17,44 @@ truncate_log() {
   fi
 }
 
-# Check if Minecraft is installed
-if [ ! -d "/opt/minecraft/server" ]; then
-  echo "Installing Minecraft server..."
-  sudo mkdir -p /opt/minecraft/server
-  sudo chown -R ubuntu:ubuntu /opt/minecraft
+# Stop the Minecraft service if running
+echo "Stopping Minecraft server if running..."
+sudo systemctl stop minecraft.service
+
+# Download and install NeoForge if not already installed
+if [ ! -f "/opt/minecraft/server/libraries/net/neoforged/forge/1.21.1/unix_args.txt" ]; then
+  echo "Installing NeoForge..."
   cd /opt/minecraft/server
   
-  echo "Downloading NeoForge..."
   wget -q https://maven.neoforged.net/releases/net/neoforged/neoforge/1.21.1/neoforge-1.21.1-installer.jar
-  
-  echo "Installing NeoForge..."
   java -jar neoforge-1.21.1-installer.jar --installServer
   
-  echo "Configuring server..."
+  # Accept EULA
   echo "eula=true" > eula.txt
+  
+  # Basic server configuration
   cat > server.properties << 'EOFINNER'
 server-port=25565
 max-players=20
 difficulty=normal
 gamemode=survival
 EOFINNER
-  
-  echo "Setting up systemd service..."
-  sudo tee /etc/systemd/system/minecraft.service << 'EOFINNER'
-[Unit]
-Description=Minecraft Server
-After=network.target
-
-[Service]
-WorkingDirectory=/opt/minecraft/server
-User=ubuntu
-Group=ubuntu
-ExecStart=/bin/sh -c 'java -Xmx2G -Xms1G @user_jvm_args.txt @libraries/net/neoforged/forge/1.21.1/unix_args.txt nogui'
-Restart=on-failure
-RestartSec=5
-
-[Install]
-WantedBy=multi-user.target
-EOFINNER
-  
-  sudo systemctl daemon-reload
-  sudo systemctl enable minecraft.service
 fi
 
-cd /opt/minecraft/server
-
-echo "Stopping Minecraft server if running..."
-sudo systemctl stop minecraft.service
-
+# Update mod files
 echo "Updating mod..."
+cd /opt/minecraft/server
 mkdir -p mods
 rm -f mods/*.jar
 cp "build/libs/voicechatmod-0.0.1.jar" mods/
 
+# Ensure correct permissions
+sudo chown -R minecraft:minecraft /opt/minecraft/server/mods
+
+# Rotate logs
 echo "Rotating logs..."
 if [ -f "logs/latest.log" ]; then
-  mv logs/latest.log "logs/previous-$(date +%Y%m%d-%H%M%S).log"
+  mv logs/latest.log "logs/previous-$(date +%Y%m%d-%H:%M:%S).log"
 fi
 
 echo "Starting Minecraft server..."
