@@ -4,9 +4,6 @@ resource "aws_apigatewayv2_api" "websocket" {
   protocol_type             = "WEBSOCKET"
   route_selection_expression = "$request.body.action"
 
-  # VPC endpoint configuration
-  vpc_endpoint_ids = [var.vpc_endpoint_id]
-
   tags = {
     Name        = "${var.prefix}-websocket"
     Environment = var.environment
