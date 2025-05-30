@@ -33,19 +33,6 @@ jobs:
         with:
           terraform_version: 1.12.1
 
-      - name: Validate Terraform Files
-        run: |
-          echo "Validating Terraform files..."
-          terraform validate 2>&1 | tee validate.log
-          
-          if [ ${PIPESTATUS[0]} -ne 0 ]; then
-            echo "::error::Terraform validation failed"
-            cat validate.log
-            exit 1
-          fi
-          
-          echo "Terraform validation successful"
-
       - name: Validate Required Secrets
         env:
           TF_STATE_BUCKET: ${{ secrets.TF_STATE_BUCKET }}
@@ -78,13 +65,6 @@ jobs:
           WORKSPACE="pr-${PR_NUMBER}"
           echo "Using workspace: $WORKSPACE"
           echo "workspace=$WORKSPACE" >> $GITHUB_OUTPUT
-
-      - name: Set up AWS CLI
-        uses: aws-actions/configure-aws-credentials@v4.0.2
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: us-east-1
 
       - name: Create Backend Config File
         env:
@@ -138,6 +118,19 @@ jobs:
           echo "INIT_LOG<<EOF" >> $GITHUB_ENV
           cat init.log >> $GITHUB_ENV
           echo "EOF" >> $GITHUB_ENV
+
+      - name: Validate Terraform Files
+        run: |
+          echo "Validating Terraform files..."
+          terraform validate 2>&1 | tee validate.log
+          
+          if [ ${PIPESTATUS[0]} -ne 0 ]; then
+            echo "::error::Terraform validation failed"
+            cat validate.log
+            exit 1
+          fi
+          
+          echo "Terraform validation successful"
 
       - name: Terraform Format Check
         id: fmt
