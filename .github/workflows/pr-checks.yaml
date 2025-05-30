@@ -82,11 +82,26 @@ jobs:
           echo "Generated backend configuration:"
           cat backend.hcl
 
+      - name: Validate Terraform Files
+        run: |
+          echo "Validating Terraform files..."
+          terraform validate 2>&1 | tee validate.log
+          VALIDATE_EXIT_CODE=${PIPESTATUS[0]}
+          
+          if [ $VALIDATE_EXIT_CODE -ne 0 ]; then
+            echo "::error::Terraform validation failed"
+            echo "Validation errors:"
+            cat validate.log
+            exit 1
+          fi
+          
+          echo "✅ Terraform validation successful"
+
       - name: Terraform Init with Backend Config
         id: init
         run: |
-          # Enable debug logging
-          export TF_LOG=DEBUG
+          # Set logging to show only errors
+          export TF_LOG=ERROR
           
           echo "Initializing Terraform..."
           terraform init -backend-config=backend.hcl -reconfigure -input=false 2>&1 | tee init.log
@@ -112,50 +127,31 @@ jobs:
             exit 1
           fi
           
-          echo "Current Terraform workspace: $CURRENT_WORKSPACE"
-          echo "Terraform initialization completed successfully"
-          
-          echo "INIT_LOG<<EOF" >> $GITHUB_ENV
-          cat init.log >> $GITHUB_ENV
-          echo "EOF" >> $GITHUB_ENV
-
-      - name: Validate Terraform Files
-        run: |
-          echo "Validating Terraform files..."
-          terraform validate 2>&1 | tee validate.log
-          
-          if [ ${PIPESTATUS[0]} -ne 0 ]; then
-            echo "::error::Terraform validation failed"
-            cat validate.log
-            exit 1
-          fi
-          
-          echo "Terraform validation successful"
+          echo "✅ Terraform initialization completed successfully"
 
       - name: Terraform Format Check
         id: fmt
         run: |
           terraform fmt -check -recursive 2>&1 | tee fmt.log
-          echo "FMT_LOG<<EOF" >> $GITHUB_ENV
-          cat fmt.log >> $GITHUB_ENV
-          echo "EOF" >> $GITHUB_ENV
+          FMT_EXIT_CODE=${PIPESTATUS[0]}
+          if [ $FMT_EXIT_CODE -ne 0 ]; then
+            echo "::error::Terraform format check failed. Please run 'terraform fmt -recursive' locally"
+            cat fmt.log
+            exit 1
+          fi
+          echo "✅ Terraform format check passed"
 
       - name: Terraform Plan
         id: plan
         env:
           TF_WORKSPACE: ${{ steps.workspace.outputs.workspace }}
         run: |
-          # Enable debug logging
-          export TF_LOG=DEBUG
+          # Set logging to show only errors
+          export TF_LOG=ERROR
           
           echo "Running Terraform plan..."
           terraform plan -no-color -detailed-exitcode -input=false -out=tfplan 2>&1 | tee plan.log
           PLAN_EXIT_CODE=${PIPESTATUS[0]}
-          
-          # Store the plan output
-          echo "PLAN_LOG<<EOF" >> $GITHUB_ENV
-          cat plan.log >> $GITHUB_ENV
-          echo "EOF" >> $GITHUB_ENV
           
           # Check plan exit code
           # Exit code 0 = No changes
@@ -168,10 +164,14 @@ jobs:
             exit 1
           fi
           
-          echo "Terraform plan completed with exit code $PLAN_EXIT_CODE"
-          
-          # Store the exit code for later use
+          # Store just the exit code
           echo "plan_exit_code=$PLAN_EXIT_CODE" >> $GITHUB_OUTPUT
+          
+          if [ $PLAN_EXIT_CODE -eq 2 ]; then
+            echo "📝 Terraform plan shows changes to be applied"
+          else
+            echo "✅ Terraform plan shows no changes needed"
+          fi
 
       - name: Test Infrastructure Deployment
         id: apply
@@ -179,34 +179,47 @@ jobs:
         env:
           TF_WORKSPACE: ${{ steps.workspace.outputs.workspace }}
         run: |
+          # Set logging to show only errors
+          export TF_LOG=ERROR
+          
           echo "🚀 Applying test infrastructure changes in workspace: $TF_WORKSPACE"
           terraform apply -auto-approve tfplan 2>&1 | tee apply.log
-          echo "APPLY_LOG<<EOF" >> $GITHUB_ENV
-          cat apply.log >> $GITHUB_ENV
-          echo "EOF" >> $GITHUB_ENV
+          APPLY_EXIT_CODE=${PIPESTATUS[0]}
+          
+          if [ $APPLY_EXIT_CODE -ne 0 ]; then
+            echo "::error::Terraform apply failed"
+            echo "Last 50 lines of apply.log:"
+            tail -n 50 apply.log
+            exit 1
+          fi
+          
+          echo "✅ Infrastructure changes applied successfully"
 
       - name: Get Instance IP
         id: get_ip
         run: |
-          # Wait a moment for the instance to be fully created
-          sleep 10
-          
           # Get the output and handle potential errors
-          if OUTPUT=$(terraform output -json); then
-            if echo "$OUTPUT" | jq -e '.instance_public_ip.value' >/dev/null; then
-              INSTANCE_IP=$(echo "$OUTPUT" | jq -r '.instance_public_ip.value')
-              echo "instance_ip=${INSTANCE_IP}" >> $GITHUB_OUTPUT
-              echo "✅ Successfully retrieved instance IP: ${INSTANCE_IP}"
-            else
-              echo "❌ Error: instance_public_ip output not found in Terraform state"
-              echo "Available outputs:"
-              echo "$OUTPUT" | jq '.'
-              exit 1
-            fi
-          else
-            echo "❌ Error: Failed to get Terraform outputs"
+          if ! OUTPUT=$(terraform output -json 2>&1); then
+            echo "::error::Failed to get Terraform outputs"
             exit 1
           fi
+          
+          if ! INSTANCE_IP=$(echo "$OUTPUT" | jq -r '.instance_public_ip.value' 2>/dev/null); then
+            echo "::error::Failed to parse instance_public_ip from Terraform output"
+            echo "Available outputs:"
+            echo "$OUTPUT" | jq '.'
+            exit 1
+          fi
+          
+          if [ "$INSTANCE_IP" = "null" ] || [ -z "$INSTANCE_IP" ]; then
+            echo "::error::instance_public_ip not found in Terraform state"
+            echo "Available outputs:"
+            echo "$OUTPUT" | jq '.'
+            exit 1
+          fi
+          
+          echo "instance_ip=$INSTANCE_IP" >> $GITHUB_OUTPUT
+          echo "✅ Successfully retrieved instance IP: $INSTANCE_IP"
 
       - name: Get SSH Key from SSM
         id: ssh_key
@@ -227,13 +240,13 @@ jobs:
               echo "✅ Successfully retrieved SSH key from SSM"
               # Mask the key in logs
               echo "::add-mask::$SSH_KEY"
-              # Store the key in environment variable for other jobs
+              # Store the key in environment variable
               echo "EC2_SSH_PRIVATE_KEY=$SSH_KEY" >> $GITHUB_ENV
               break
             else
               RETRY_COUNT=$((RETRY_COUNT + 1))
               if [ $RETRY_COUNT -eq $MAX_RETRIES ]; then
-                echo "❌ Failed to retrieve SSH key after $MAX_RETRIES attempts"
+                echo "::error::Failed to retrieve SSH key after $MAX_RETRIES attempts"
                 exit 1
               fi
               echo "Attempt $RETRY_COUNT failed, waiting 10 seconds before retry..."
@@ -256,9 +269,7 @@ jobs:
             
             **Resources Status:**
             - Infrastructure Apply: ${process.env.APPLY_STATUS === 'success' ? '✅ Success' : '❌ Failed'}
-            ${process.env.INSTANCE_IP ? `- Instance IP: \`${process.env.INSTANCE_IP}\`` : ''}
-            
-            ${process.env.APPLY_STATUS !== 'success' ? '⚠️ Check workflow logs for detailed error information.' : ''}`;
+            ${process.env.INSTANCE_IP ? `- Instance IP: \`${process.env.INSTANCE_IP}\`` : ''}`;
             
             await github.rest.pulls.createReview({
               owner: context.repo.owner,
