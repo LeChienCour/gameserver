@@ -112,11 +112,11 @@ variable "lambda_environment_variables" {
 variable "lambda_functions" {
   description = "Map of Lambda function names to their deployment package paths"
   type        = map(string)
-  default     = {
-    connect = "lambda/connect.zip"
-    disconnect = "lambda/disconnect.zip"
-    message = "lambda/message.zip"
-    process_audio = "lambda/process_audio.zip"
+  default = {
+    connect        = "lambda/connect.zip"
+    disconnect     = "lambda/disconnect.zip"
+    message        = "lambda/message.zip"
+    process_audio  = "lambda/process_audio.zip"
     validate_audio = "lambda/validate_audio.zip"
   }
 }

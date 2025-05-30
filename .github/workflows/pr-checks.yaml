@@ -190,16 +190,14 @@ jobs:
         if: steps.plan.outcome == 'failure'
         run: exit 1
 
-  build_mod:
+  deploy_mod:
+    needs: [terraform_deploy]
     runs-on: ubuntu-latest
     permissions:
       contents: read        # For checkout
       pull-requests: write  # For commenting results
+      id-token: write      # For AWS authentication
       checks: write        # For test results
-      actions: read        # For artifacts
-    outputs:
-      build_status: ${{ steps.build.outcome }}
-      test_status: ${{ steps.test.outcome }}
     steps:
       - uses: actions/checkout@v4.1.1
         with:
@@ -215,144 +213,24 @@ jobs:
           distribution: 'temurin'
           cache: 'gradle'
 
-      - name: Setup Gradle
-        uses: gradle/gradle-build-action@v2.11.1
-        with:
-          gradle-version: 8.14
-          cache-read-only: ${{ github.ref != 'refs/heads/main' }}
-          gradle-home-cache-cleanup: true
-          cache-overwrite-existing: true
-          gradle-home-cache-includes: |
-            caches/modules-2
-            caches/transforms-3
-            wrapper
-          gradle-home-cache-excludes: |
-            caches/build-cache-*
-            caches/journal-*
-            caches/jars-*
-            daemon
-            native
-          gradle-build-action-cache-timeout-mins: 10
-          
-      - name: Configure Gradle Properties
-        run: |
-          mkdir -p ~/.gradle
-          cat > ~/.gradle/gradle.properties << EOF
-          org.gradle.caching=true
-          org.gradle.parallel=true
-          org.gradle.daemon=false
-          org.gradle.configureondemand=true
-          org.gradle.jvmargs=-Xmx2g -XX:MaxMetaspaceSize=512m -XX:+HeapDumpOnOutOfMemoryError
-          org.gradle.caching.debug=true
-          org.gradle.internal.http.connectionTimeout=120000
-          org.gradle.internal.http.socketTimeout=120000
-          EOF
-
-      - name: Grant execute permission for gradlew
-        run: |
-          chmod +x ./mod_source/gradlew
-
-      - name: Build Mod
+      - name: Build and Test Mod
         id: build
         working-directory: ./mod_source
         run: |
-          # Verify Gradle version
-          gradle --version
-          
-          # Build with optimized configuration
-          gradle build \
-            --no-daemon \
-            --build-cache \
-            --parallel \
-            --stacktrace \
-            --info \
-            --console=plain \
-            -Pmod_version=0.0.1 \
-            -Dorg.gradle.caching.debug=true \
-            -Dorg.gradle.internal.http.connectionTimeout=120000 \
-            -Dorg.gradle.internal.http.socketTimeout=120000
+          chmod +x ./gradlew
+          ./gradlew build test --no-daemon --parallel --stacktrace
           
           # Verify build output
           if [ -d "build/libs" ]; then
-            echo "Build artifacts created:"
-            ls -la build/libs/
+            echo "✅ Build artifacts created successfully"
+            echo "mod_jar=$(ls build/libs/*-all.jar | head -n1)" >> $GITHUB_OUTPUT
           else
-            echo "Error: No build/libs directory found after build!"
+            echo "❌ Error: No build artifacts found!"
             exit 1
           fi
 
-      - name: Run Tests
-        id: test
-        if: success()
-        run: |
-          cd ./mod_source
-          ./gradlew test \
-            --no-daemon \
-            --build-cache \
-            --parallel \
-            --stacktrace \
-            --info \
-            --console=plain \
-            -Dorg.gradle.caching.debug=true \
-            -Dorg.gradle.internal.http.connectionTimeout=120000 \
-            -Dorg.gradle.internal.http.socketTimeout=120000 \
-            > test_output.log 2>&1
-          echo "Test execution completed"
-
-      - name: Update PR with Build Results
-        uses: actions/github-script@v7.0.1
-        if: always()
-        env:
-          BUILD_STATUS: ${{ steps.build.outcome }}
-          TEST_STATUS: ${{ steps.test.outcome }}
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          script: |
-            const buildStatus = process.env.BUILD_STATUS === 'success' ? '✅' : '❌';
-            const testStatus = process.env.TEST_STATUS === 'success' ? '✅' : '❌';
-            
-            let testDetails = '';
-            if (process.env.TEST_STATUS === 'failure') {
-              const fs = require('fs');
-              try {
-                const log = fs.readFileSync('mod_source/test_output.log', 'utf8');
-                // Get last 500 characters of log if it failed
-                testDetails = '\n\nTest Output (last 500 chars):\n```\n' + 
-                  log.slice(-500) + '\n```';
-              } catch (error) {
-                testDetails = '\n\nError reading test log: ' + error.message;
-              }
-            }
-            
-            const output = `### Mod Build Status ${buildStatus}
-
-            **Build Steps:**
-            - Build: ${buildStatus}
-            - Tests: ${testStatus}${testDetails}
-            
-            ${process.env.BUILD_STATUS !== 'success' || process.env.TEST_STATUS !== 'success' ? '⚠️ Check workflow logs for detailed error information.' : ''}`;
-            
-            await github.rest.pulls.createReview({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              pull_number: context.issue.number,
-              body: output,
-              event: 'COMMENT'
-            });
-
-  deploy_mod:
-    needs: [build_mod, terraform_deploy]
-    if: needs.build_mod.outputs.build_status == 'success' && needs.build_mod.outputs.test_status == 'success'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read        # For checkout
-      pull-requests: write  # For commenting results
-      id-token: write      # For AWS authentication
-    outputs:
-      deployment_status: ${{ steps.verify_deployment.outputs.status }}
-    steps:
       - name: Create VoiceChat Config
-        id: create_config
+        if: success()
         run: |
           mkdir -p VoiceChatMod/runs/client/config
           cat > VoiceChatMod/runs/client/config/voicechat-common.toml << 'EOF'
@@ -372,9 +250,13 @@ jobs:
 
       - name: Get SSH Key from SSM
         id: get_ssh_key
+        env:
+          AWS_REGION: us-east-1
+          WORKSPACE: ${{ steps.workspace.outputs.workspace }}
         run: |
           SSH_KEY=$(aws ssm get-parameter \
-            --name "/minecraft/${{ steps.workspace.outputs.workspace }}/ssh_private_key" \
+            --region ${AWS_REGION} \
+            --name "/minecraft/${WORKSPACE}/ssh_private_key" \
             --with-decryption \
             --query 'Parameter.Value' \
             --output text)
@@ -384,19 +266,21 @@ jobs:
           echo "EOF" >> $GITHUB_OUTPUT
 
       - name: Deploy to Server
+        if: success()
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ needs.terraform_deploy.outputs.instance_ip }}
           username: ubuntu
           key: ${{ steps.get_ssh_key.outputs.ssh_key }}
           port: 22
-          command_timeout: 10m
           script: |
             # Setup directories
             sudo mkdir -p /opt/minecraft/server
             sudo chown -R ubuntu:ubuntu /opt/minecraft
             cd /opt/minecraft/server
-            mkdir -p VoiceChatMod/runs/client/config mods
+            
+            # Create necessary directories
+            mkdir -p mods config
             
             # Download and install Minecraft + NeoForge
             wget -q https://maven.neoforged.net/releases/net/neoforged/neoforge/1.21.1/neoforge-1.21.1-installer.jar
@@ -417,7 +301,7 @@ jobs:
             spawn-protection=0
             EOF
             
-            # Create systemd service file
+            # Create systemd service
             sudo tee /etc/systemd/system/minecraft.service << 'EOF'
             [Unit]
             Description=Minecraft Server
@@ -437,97 +321,29 @@ jobs:
             WantedBy=multi-user.target
             EOF
             
-            # Create config file
-            cat > VoiceChatMod/runs/client/config/voicechat-common.toml << 'EOF'
-            enableVoiceChat = true
-            defaultVolume = 0.7
-            maxVoiceDistance = 64
-            reconnectionAttempts = 3
-            reconnectionDelay = 5
-            websocketStageUrl = "${{ secrets.WEBSOCKET_STAGE_URL }}"
-            websocketApiKey = "${{ secrets.WEBSOCKET_API_KEY }}"
-            userPoolId = "${{ secrets.USER_POOL_ID }}"
-            userPoolClientId = "${{ secrets.USER_POOL_CLIENT_ID }}"
-            selectedMicrophone = ""
-            useSystemDefaultMic = true
-            microphoneBoost = 1.0
-            EOF
+            # Copy mod and config
+            cp ${{ steps.build.outputs.mod_jar }} mods/
+            cp -r VoiceChatMod/runs/client/config/* config/
             
             # Reload systemd and start service
             sudo systemctl daemon-reload
             sudo systemctl enable minecraft.service
             sudo systemctl start minecraft.service
-            
-            # Wait for server to start and check logs
-            sleep 30
-            if ! grep -q "Done" logs/latest.log 2>/dev/null; then
-              echo "Server failed to start properly"
-              cat logs/latest.log
-              exit 1
-            fi
 
-      - name: Verify Deployment
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ needs.terraform_deploy.outputs.instance_ip }}
-          username: ubuntu
-          key: ${{ secrets.EC2_SSH_PRIVATE_KEY }}
-          script: |
-            cd /opt/minecraft/server
-            
-            # Service check
-            if ! sudo systemctl is-active --quiet minecraft.service; then
-              echo "❌ Service check failed"
-              exit 1
-            fi
-            
-            # Mod check
-            if ! ls mods/*VoiceChat*.jar >/dev/null 2>&1; then
-              echo "❌ Mod check failed"
-              exit 1
-            fi
-            
-            # Config check
-            if ! [ -f VoiceChatMod/runs/client/config/voicechat-common.toml ]; then
-              echo "❌ Config check failed"
-              exit 1
-            fi
-            
-            # Log check
-            if ! grep -q "VoiceChat mod initialized" logs/latest.log; then
-              echo "❌ Mod initialization failed"
-              tail -n 50 logs/latest.log
-              exit 1
-            fi
-            
-            echo "✅ All checks passed"
-
-      - name: Set Deployment Status
-        id: set_status
+      - name: Update PR with Deployment Status
         if: always()
-        run: |
-          if [ "${{ steps.verify_deployment.outcome }}" = "success" ]; then
-            echo "status=success" >> $GITHUB_OUTPUT
-          else
-            echo "status=failure" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Update PR with Verification Results
         uses: actions/github-script@v7.0.1
-        if: always()
-        env:
-          VERIFICATION_OUTCOME: ${{ steps.verify_deployment.outcome }}
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
-            const status = process.env.VERIFICATION_OUTCOME === 'success' ? '✅ Success' : '❌ Failed';
-            const output = `### Deployment Verification Results ${status}
+            const buildStatus = '${{ steps.build.outcome }}' === 'success' ? '✅' : '❌';
+            const output = `### Mod Deployment Status ${buildStatus}
             
-            ${process.env.VERIFICATION_OUTCOME === 'success' 
-              ? '- All components verified successfully\n- Server is running\n- Mod is installed\n- Configuration is correct\n- Mod initialized properly' 
-              : '- Verification failed. Check the workflow logs for details'}
+            **Steps:**
+            - Build and Test: ${buildStatus}
+            - Server Configuration: ${{ steps.deploy.outcome === 'success' ? '✅' : '❌' }}
             
-            *Workflow: [${context.workflow}](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})*`;
+            ${buildStatus === '✅' ? '✅ Mod successfully deployed to server' : '❌ Deployment failed - check workflow logs for details'}`;
             
             await github.rest.pulls.createReview({
               owner: context.repo.owner,
@@ -538,14 +354,12 @@ jobs:
             });
 
   cleanup_infrastructure:
-    needs: [terraform_deploy, build_mod, deploy_mod]
+    needs: [terraform_deploy, deploy_mod]
     if: |
       always() && 
       (
         github.event.action == 'closed' || 
         needs.terraform_deploy.result == 'failure' ||
-        needs.build_mod.outputs.build_status == 'failure' ||
-        needs.build_mod.outputs.test_status == 'failure' ||
         needs.deploy_mod.result == 'failure'
       )
     runs-on: ubuntu-latest

@@ -13,8 +13,8 @@ resource "aws_cloudwatch_log_group" "game_event_logs" {
 
 # Create EventBridge rule to capture game events
 resource "aws_cloudwatch_event_rule" "game_event_rule" {
-  name          = "${var.prefix}-event-rule"
-  description   = "Capture game events"
+  name           = "${var.prefix}-event-rule"
+  description    = "Capture game events"
   event_bus_name = aws_cloudwatch_event_bus.game_event_bus.name
 
   event_pattern = jsonencode({
@@ -33,8 +33,8 @@ resource "aws_cloudwatch_event_target" "log_target" {
 
 # Audio Processing Event Rules
 resource "aws_cloudwatch_event_rule" "audio_processing_rule" {
-  name        = "${var.prefix}-audio-processing-rule"
-  description = "Rule for processing audio events"
+  name           = "${var.prefix}-audio-processing-rule"
+  description    = "Rule for processing audio events"
   event_bus_name = aws_cloudwatch_event_bus.game_event_bus.name
 
   event_pattern = jsonencode({
@@ -44,7 +44,7 @@ resource "aws_cloudwatch_event_rule" "audio_processing_rule" {
       status = ["PENDING"]
       message = {
         action = ["sendaudio"]
-        data = [{ "exists": true }]
+        data   = [{ "exists" : true }]
       }
     }
   })
@@ -59,8 +59,8 @@ resource "aws_cloudwatch_event_target" "audio_processing_target" {
 }
 
 resource "aws_cloudwatch_event_rule" "audio_validation_rule" {
-  name        = "${var.prefix}-audio-validation-rule"
-  description = "Rule for validating audio events"
+  name           = "${var.prefix}-audio-validation-rule"
+  description    = "Rule for validating audio events"
   event_bus_name = aws_cloudwatch_event_bus.game_event_bus.name
 
   event_pattern = jsonencode({
@@ -68,15 +68,15 @@ resource "aws_cloudwatch_event_rule" "audio_validation_rule" {
     detail-type = ["SendAudioEvent"]
     detail = {
       status = ["PROCESSED"]
-      s3_key = [{ "exists": true }]
+      s3_key = [{ "exists" : true }]
       websocket_context = {
-        domain_name = [{ "exists": true }]
-        stage = [{ "exists": true }]
-        connection_id = [{ "exists": true }]
+        domain_name   = [{ "exists" : true }]
+        stage         = [{ "exists" : true }]
+        connection_id = [{ "exists" : true }]
       }
       message = {
-        data = [{ "exists": true }]
-        author = [{ "exists": true }]
+        data   = [{ "exists" : true }]
+        author = [{ "exists" : true }]
       }
     }
   })

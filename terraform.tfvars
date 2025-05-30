@@ -28,9 +28,9 @@ project_name = "voice-chat"
 prefix       = "voice-chat"
 
 # EventBridge Configuration
-event_bus_name    = "voice-chat-event-bus"
-event_source      = "game-server"
-event_detail_type = "GameEvent"
+event_bus_name     = "voice-chat-event-bus"
+event_source       = "game-server"
+event_detail_type  = "GameEvent"
 log_retention_days = 30
 
 # WebSocket Configuration

@@ -1,7 +1,7 @@
 # WebSocket API Gateway
 resource "aws_apigatewayv2_api" "websocket" {
   name                       = "${var.prefix}-websocket"
-  protocol_type             = "WEBSOCKET"
+  protocol_type              = "WEBSOCKET"
   route_selection_expression = "$request.body.action"
 
   tags = {
@@ -76,22 +76,22 @@ resource "aws_apigatewayv2_stage" "websocket" {
   access_log_settings {
     destination_arn = aws_cloudwatch_log_group.websocket.arn
     format = jsonencode({
-      requestId      = "$context.requestId"
-      ip            = "$context.identity.sourceIp"
-      requestTime   = "$context.requestTime"
-      routeKey      = "$context.routeKey"
-      status        = "$context.status"
-      connectionId  = "$context.connectionId"
+      requestId    = "$context.requestId"
+      ip           = "$context.identity.sourceIp"
+      requestTime  = "$context.requestTime"
+      routeKey     = "$context.routeKey"
+      status       = "$context.status"
+      connectionId = "$context.connectionId"
       error        = "$context.error.message"
     })
   }
 
   default_route_settings {
-    throttling_burst_limit = 100
-    throttling_rate_limit  = 50
-    data_trace_enabled     = true
+    throttling_burst_limit   = 100
+    throttling_rate_limit    = 50
+    data_trace_enabled       = true
     detailed_metrics_enabled = true
-    logging_level         = "INFO"
+    logging_level            = "INFO"
   }
 
   tags = {
