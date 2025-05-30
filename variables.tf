@@ -59,9 +59,9 @@ variable "user_pool_name" {
 
 # EC2 Instance Configuration
 variable "ami_id" {
-  description = "AMI ID for the EC2 instance"
+  description = "AMI ID for the EC2 instance (optional, will use latest Amazon Linux 2 if not specified)"
   type        = string
-  default     = "ami-0c7217cdde317cfec"  # Ubuntu 22.04 LTS
+  default     = null
 }
 
 variable "instance_type" {
@@ -112,11 +112,11 @@ variable "lambda_environment_variables" {
 variable "lambda_functions" {
   description = "Map of Lambda function names to their deployment package paths"
   type        = map(string)
-  default     = {
-    connect = "lambda/connect.zip"
-    disconnect = "lambda/disconnect.zip"
-    message = "lambda/message.zip"
-    process_audio = "lambda/process_audio.zip"
+  default = {
+    connect        = "lambda/connect.zip"
+    disconnect     = "lambda/disconnect.zip"
+    message        = "lambda/message.zip"
+    process_audio  = "lambda/process_audio.zip"
     validate_audio = "lambda/validate_audio.zip"
   }
 }

@@ -1,7 +1,7 @@
 # WebSocket API Gateway
 resource "aws_apigatewayv2_api" "websocket" {
   name                       = "${var.prefix}-websocket"
-  protocol_type             = "WEBSOCKET"
+  protocol_type              = "WEBSOCKET"
   route_selection_expression = "$request.body.action"
 
   tags = {
@@ -69,37 +69,30 @@ resource "aws_cloudwatch_log_group" "websocket" {
 
 # WebSocket Stage with Logging and Monitoring
 resource "aws_apigatewayv2_stage" "websocket" {
-  api_id = aws_apigatewayv2_api.websocket.id
-  name   = var.stage_name
+  api_id      = aws_apigatewayv2_api.websocket.id
+  name        = var.stage_name
+  auto_deploy = true
 
-  # Detailed access logging configuration
   access_log_settings {
     destination_arn = aws_cloudwatch_log_group.websocket.arn
     format = jsonencode({
-      requestId      = "$context.requestId"
-      ip            = "$context.identity.sourceIp"
-      caller        = "$context.identity.caller"
-      user          = "$context.identity.user"
-      requestTime   = "$context.requestTime"
-      httpMethod    = "$context.httpMethod"
-      resourcePath  = "$context.resourcePath"
-      status        = "$context.status"
-      protocol      = "$context.protocol"
-      responseLength = "$context.responseLength"
-      integrationError = "$context.integrationErrorMessage"
+      requestId    = "$context.requestId"
+      ip           = "$context.identity.sourceIp"
+      requestTime  = "$context.requestTime"
+      routeKey     = "$context.routeKey"
+      status       = "$context.status"
+      connectionId = "$context.connectionId"
+      error        = "$context.error.message"
     })
   }
 
-  # Stage settings for monitoring and throttling
   default_route_settings {
+    throttling_burst_limit   = 100
+    throttling_rate_limit    = 50
+    data_trace_enabled       = true
     detailed_metrics_enabled = true
-    logging_level           = "INFO"
-    data_trace_enabled      = true
-    throttling_burst_limit  = 100
-    throttling_rate_limit   = 50
+    logging_level            = "INFO"
   }
-
-  auto_deploy = true
 
   tags = {
     Name        = "${var.prefix}-websocket-stage"
@@ -111,6 +104,7 @@ resource "aws_apigatewayv2_stage" "websocket" {
 # API Gateway Account Settings for CloudWatch Integration
 resource "aws_api_gateway_account" "websocket" {
   cloudwatch_role_arn = var.cloudwatch_role_arn
+  reset_on_delete     = true
 }
 
 # WebSocket Routes and Integrations for API Gateway

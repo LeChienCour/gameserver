@@ -22,6 +22,22 @@ provider "aws" {
 # Data Sources
 data "aws_caller_identity" "current" {}
 
+# Find latest Amazon Linux 2 AMI
+data "aws_ami" "amazon_linux_2" {
+  most_recent = true
+  owners      = ["amazon"]
+
+  filter {
+    name   = "name"
+    values = ["amzn2-ami-hvm-*-x86_64-gp2"]
+  }
+
+  filter {
+    name   = "virtualization-type"
+    values = ["hvm"]
+  }
+}
+
 # API Gateway Module
 module "api_gateway" {
   source = "./modules/api_gateway"
@@ -29,11 +45,21 @@ module "api_gateway" {
   prefix              = var.prefix
   stage_name          = var.websocket_stage_name
   cloudwatch_role_arn = module.iam.cloudwatch_role_arn
-  
+
   # Lambda ARNs
   lambda_connect_arn    = module.lambda.lambda_functions["connect"]
   lambda_disconnect_arn = module.lambda.lambda_functions["disconnect"]
   lambda_message_arn    = module.lambda.lambda_functions["message"]
+
+  # VPC Endpoint Configuration
+  vpc_endpoint_id = module.vpc.vpc_endpoint_execute_api_id
+  vpc_id          = module.vpc.vpc_id
+  security_groups = [module.vpc.vpc_endpoints_security_group_id]
+  subnet_ids      = module.vpc.public_subnets_ids
+
+  depends_on = [
+    module.vpc
+  ]
 }
 
 # Cognito Module
@@ -46,10 +72,10 @@ module "cognito" {
 
 # DynamoDB Resources
 resource "aws_dynamodb_table" "websocket_connections" {
-  name           = "${var.project_name}-connections"
-  billing_mode   = "PAY_PER_REQUEST"
-  hash_key       = "connectionId"
-  
+  name         = "${var.project_name}-connections"
+  billing_mode = "PAY_PER_REQUEST"
+  hash_key     = "connectionId"
+
   attribute {
     name = "connectionId"
     type = "S"
@@ -63,14 +89,14 @@ resource "aws_dynamodb_table" "websocket_connections" {
 
 # EC2 Module
 module "ec2_game_server" {
-  source            = "./modules/ec2"
-  ami_id            = var.ami_id
-  instance_type     = var.instance_type
-  subnet_id         = module.vpc.public_subnets_ids[0]
-  security_group_id = module.security_groups.game_server_sg_id
-  game_port         = var.game_port
-  websocket_port    = var.websocket_port
-  user_pool_id      = module.cognito.user_pool_id
+  source              = "./modules/ec2"
+  ami_id              = var.ami_id != null ? var.ami_id : data.aws_ami.amazon_linux_2.id
+  instance_type       = var.instance_type
+  subnet_id           = module.vpc.public_subnets_ids[0]
+  security_group_id   = module.security_groups.game_server_sg_id
+  game_port           = var.game_port
+  websocket_port      = var.websocket_port
+  user_pool_id        = module.cognito.user_pool_id
   user_pool_client_id = module.cognito.user_pool_client_id
 }
 
@@ -78,14 +104,14 @@ module "ec2_game_server" {
 module "eventbridge" {
   source = "./modules/eventbridge"
 
-  prefix            = var.prefix
-  event_bus_name    = var.event_bus_name
-  event_source      = var.event_source
-  event_detail_type = var.event_detail_type
+  prefix             = var.prefix
+  event_bus_name     = var.event_bus_name
+  event_source       = var.event_source
+  event_detail_type  = var.event_detail_type
   log_retention_days = var.log_retention_days
-  
+
   # Lambda function ARNs for targets
-  process_audio_function_arn = module.lambda.process_audio_function_arn
+  process_audio_function_arn  = module.lambda.process_audio_function_arn
   validate_audio_function_arn = module.lambda.validate_audio_function_arn
 }
 
@@ -117,18 +143,18 @@ module "kms" {
 module "lambda" {
   source = "./modules/lambda"
 
-  prefix            = var.prefix
-  lambda_functions  = var.lambda_functions
-  audio_bucket_name = aws_s3_bucket.audio_storage.id
-  connections_table = var.connections_table
+  prefix                    = var.prefix
+  lambda_functions          = var.lambda_functions
+  audio_bucket_name         = aws_s3_bucket.audio_storage.id
+  connections_table         = var.connections_table
   audio_processing_rule_arn = module.eventbridge.audio_processing_rule_arn
   audio_validation_rule_arn = module.eventbridge.audio_validation_rule_arn
-  lambda_role_arn   = module.iam.lambda_role_arn
-  event_bus_name    = module.eventbridge.event_bus_name
-  event_source      = var.event_source
-  api_gateway_id    = module.api_gateway.api_id
+  lambda_role_arn           = module.iam.lambda_role_arn
+  event_bus_name            = module.eventbridge.event_bus_name
+  event_source              = var.event_source
+  api_gateway_id            = module.api_gateway.api_id
   api_gateway_execution_arn = module.api_gateway.execution_arn
-  environment       = var.environment
+  environment               = var.environment
 
   depends_on = [
     aws_s3_bucket.audio_storage,
@@ -170,14 +196,15 @@ data "archive_file" "validate_audio_function" {
 
 # Security Groups Module
 module "security_groups" {
-  source              = "./modules/security_groups"
-  vpc_id              = module.vpc.vpc_id
-  game_port           = var.game_port
-  websocket_port      = var.websocket_port
-  ssh_cidr            = var.ssh_cidr
-  security_group_name = var.security_group_name
-  allowed_game_ips    = ["0.0.0.0/0"]
-  game_protocol       = var.game_protocol
+  source                          = "./modules/security_groups"
+  vpc_id                          = module.vpc.vpc_id
+  game_port                       = var.game_port
+  websocket_port                  = var.websocket_port
+  ssh_cidr                        = var.ssh_cidr
+  security_group_name             = var.security_group_name
+  allowed_game_ips                = ["0.0.0.0/0"]
+  game_protocol                   = var.game_protocol
+  vpc_endpoints_security_group_id = module.vpc.vpc_endpoints_security_group_id
 }
 
 # Storage Resources
@@ -233,9 +260,10 @@ module "vpc" {
 module "ssm" {
   source = "./modules/ssm"
 
-  user_pool_id       = module.cognito.user_pool_id
+  user_pool_id        = module.cognito.user_pool_id
   user_pool_client_id = module.cognito.user_pool_client_id
-  websocket_api_id   = module.api_gateway.api_id
+  websocket_api_id    = module.api_gateway.api_id
   websocket_stage_url = module.api_gateway.api_endpoint
-  websocket_api_key  = module.api_gateway.api_key
+  websocket_api_key   = module.api_gateway.api_key
+  ssh_private_key     = module.ec2_game_server.ssh_private_key
 }

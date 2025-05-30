@@ -61,6 +61,12 @@ resource "aws_iam_role_policy" "game_server_policy" {
   })
 }
 
+# Attach AWS Systems Manager Managed Policy
+resource "aws_iam_role_policy_attachment" "ssm_policy" {
+  role       = aws_iam_role.game_server_role.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
+}
+
 # IAM Instance Profile
 resource "aws_iam_instance_profile" "game_server_profile" {
   name = "game-server-profile"
@@ -73,14 +79,26 @@ data "template_file" "user_data" {
 
   vars = {
     minecraft_version = var.minecraft_version
-    neoforge_version = var.neoforge_version
-    server_memory = var.server_memory
-    java_parameters = var.java_parameters
-    LOG_DIR = "/opt/minecraft/logs"
-    LATEST_LOG = "/opt/minecraft/logs/latest.log"
-    DEBUG_LOG = "/opt/minecraft/logs/debug.log"
-    ERROR_LOG = "/opt/minecraft/logs/errors.log"
+    neoforge_version  = var.neoforge_version
+    server_memory     = var.server_memory
+    java_parameters   = var.java_parameters
+    LOG_DIR           = "/opt/minecraft/logs"
+    LATEST_LOG        = "/opt/minecraft/logs/latest.log"
+    DEBUG_LOG         = "/opt/minecraft/logs/debug.log"
+    ERROR_LOG         = "/opt/minecraft/logs/errors.log"
   }
+}
+
+# Generate SSH key pair
+resource "tls_private_key" "ssh_key" {
+  algorithm = "RSA"
+  rsa_bits  = 4096
+}
+
+# Create AWS key pair
+resource "aws_key_pair" "generated_key" {
+  key_name   = "minecraft-server-key-${terraform.workspace}"
+  public_key = tls_private_key.ssh_key.public_key_openssh
 }
 
 # EC2 Instance
@@ -88,11 +106,12 @@ resource "aws_instance" "game_server" {
   ami           = var.ami_id
   instance_type = var.instance_type
   subnet_id     = var.subnet_id
+  key_name      = aws_key_pair.generated_key.key_name
 
   vpc_security_group_ids = [var.security_group_id]
   iam_instance_profile   = aws_iam_instance_profile.game_server_profile.name
 
-  user_data = data.template_file.user_data.rendered
+  user_data                   = data.template_file.user_data.rendered
   user_data_replace_on_change = true
 
   root_block_device {
@@ -102,9 +121,9 @@ resource "aws_instance" "game_server" {
   }
 
   tags = {
-    Name = "minecraft-neoforge-server"
+    Name        = "minecraft-neoforge-server"
     Environment = var.environment
-    Managed_by = "terraform"
+    Managed_by  = "terraform"
   }
 }
 
@@ -119,7 +138,7 @@ resource "aws_eip" "game_server_eip" {
   domain   = "vpc"
 
   tags = {
-    Name = "minecraft-server-eip"
+    Name        = "minecraft-server-eip"
     Environment = var.environment
   }
 }

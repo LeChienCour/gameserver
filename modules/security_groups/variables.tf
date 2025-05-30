@@ -38,3 +38,8 @@ variable "allowed_game_ips" {
   type        = list(string)
   default     = ["0.0.0.0/0"]
 }
+
+variable "vpc_endpoints_security_group_id" {
+  description = "ID of the VPC endpoints security group"
+  type        = string
+}

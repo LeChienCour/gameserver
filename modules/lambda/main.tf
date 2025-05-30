@@ -1,18 +1,18 @@
 # Audio Processing Lambda Functions
 resource "aws_lambda_function" "process_audio" {
-  filename         = var.lambda_functions.process_audio
-  function_name    = "${var.prefix}-process-audio"
-  role            = var.lambda_role_arn
-  handler         = "lambda_function.lambda_handler"
-  runtime         = "python3.10"
-  timeout         = var.process_audio_timeout
-  memory_size     = var.process_audio_memory
+  filename      = var.lambda_functions.process_audio
+  function_name = "${var.prefix}-process-audio"
+  role          = var.lambda_role_arn
+  handler       = "lambda_function.lambda_handler"
+  runtime       = "python3.10"
+  timeout       = var.process_audio_timeout
+  memory_size   = var.process_audio_memory
 
   environment {
     variables = {
-      AUDIO_BUCKET = var.audio_bucket_name
+      AUDIO_BUCKET   = var.audio_bucket_name
       EVENT_BUS_NAME = var.event_bus_name
-      EVENT_SOURCE = var.event_source
+      EVENT_SOURCE   = var.event_source
     }
   }
 
@@ -24,19 +24,19 @@ resource "aws_lambda_function" "process_audio" {
 }
 
 resource "aws_lambda_function" "validate_audio" {
-  filename         = var.lambda_functions.validate_audio
-  function_name    = "${var.prefix}-validate-audio"
-  role            = var.lambda_role_arn
-  handler         = "lambda_function.lambda_handler"
-  runtime         = "python3.10"
-  timeout         = var.validate_audio_timeout
-  memory_size     = var.validate_audio_memory
+  filename      = var.lambda_functions.validate_audio
+  function_name = "${var.prefix}-validate-audio"
+  role          = var.lambda_role_arn
+  handler       = "lambda_function.lambda_handler"
+  runtime       = "python3.10"
+  timeout       = var.validate_audio_timeout
+  memory_size   = var.validate_audio_memory
 
   environment {
     variables = {
       CONNECTIONS_TABLE = var.connections_table
-      EVENT_BUS_NAME = var.event_bus_name
-      EVENT_SOURCE = var.event_source
+      EVENT_BUS_NAME    = var.event_bus_name
+      EVENT_SOURCE      = var.event_source
     }
   }
 
@@ -49,13 +49,13 @@ resource "aws_lambda_function" "validate_audio" {
 
 # WebSocket Connection Management Lambda Functions
 resource "aws_lambda_function" "connect" {
-  filename         = var.lambda_functions.connect
-  function_name    = "${var.prefix}-connect"
-  role            = var.lambda_role_arn
-  handler         = "lambda_function.lambda_handler"
-  runtime         = "python3.10"
-  timeout         = var.websocket_timeout
-  memory_size     = var.websocket_memory
+  filename      = var.lambda_functions.connect
+  function_name = "${var.prefix}-connect"
+  role          = var.lambda_role_arn
+  handler       = "lambda_function.lambda_handler"
+  runtime       = "python3.10"
+  timeout       = var.websocket_timeout
+  memory_size   = var.websocket_memory
 
   environment {
     variables = {
@@ -71,13 +71,13 @@ resource "aws_lambda_function" "connect" {
 }
 
 resource "aws_lambda_function" "disconnect" {
-  filename         = var.lambda_functions.disconnect
-  function_name    = "${var.prefix}-disconnect"
-  role            = var.lambda_role_arn
-  handler         = "lambda_function.lambda_handler"
-  runtime         = "python3.10"
-  timeout         = var.websocket_timeout
-  memory_size     = var.websocket_memory
+  filename      = var.lambda_functions.disconnect
+  function_name = "${var.prefix}-disconnect"
+  role          = var.lambda_role_arn
+  handler       = "lambda_function.lambda_handler"
+  runtime       = "python3.10"
+  timeout       = var.websocket_timeout
+  memory_size   = var.websocket_memory
 
   environment {
     variables = {
@@ -93,19 +93,19 @@ resource "aws_lambda_function" "disconnect" {
 }
 
 resource "aws_lambda_function" "message" {
-  filename         = var.lambda_functions.message
-  function_name    = "${var.prefix}-message"
-  role            = var.lambda_role_arn
-  handler         = "lambda_function.lambda_handler"
-  runtime         = "python3.10"
-  timeout         = var.websocket_timeout
-  memory_size     = var.websocket_memory
+  filename      = var.lambda_functions.message
+  function_name = "${var.prefix}-message"
+  role          = var.lambda_role_arn
+  handler       = "lambda_function.lambda_handler"
+  runtime       = "python3.10"
+  timeout       = var.websocket_timeout
+  memory_size   = var.websocket_memory
 
   environment {
     variables = {
       CONNECTIONS_TABLE = var.connections_table
-      EVENT_BUS_NAME = var.event_bus_name
-      EVENT_SOURCE = var.event_source
+      EVENT_BUS_NAME    = var.event_bus_name
+      EVENT_SOURCE      = var.event_source
     }
   }
 
