@@ -244,6 +244,13 @@ jobs:
             --with-decryption \
             --query 'Parameter.Value' \
             --output text)
+            
+          # Verify SSH key format
+          if ! echo "$SSH_KEY" | ssh-keygen -l -f - >/dev/null 2>&1; then
+            echo "Error: Invalid SSH key format"
+            exit 1
+          fi
+          
           echo "::add-mask::$SSH_KEY"
           echo "ssh_key<<EOF" >> $GITHUB_OUTPUT
           echo "$SSH_KEY" >> $GITHUB_OUTPUT
@@ -254,7 +261,19 @@ jobs:
         working-directory: ./mod_source
         run: |
           chmod +x ./gradlew
-          ./gradlew build test --no-daemon --parallel --stacktrace
+          # Clean the project first
+          ./gradlew clean
+          
+          # Build and test with specific configurations
+          ./gradlew build test \
+            --no-daemon \
+            --parallel \
+            --stacktrace \
+            --warning-mode=summary \
+            -Dorg.gradle.java.installations.auto-download=false \
+            -Porg.gradle.java.installations.paths=/opt/hostedtoolcache/Java_Temurin-Hotspot_jdk/17.0.15-6/x64 \
+            -Dorg.gradle.warning.mode=none \
+            -x neoFormApplyParchment
           
           # Verify build output
           if [ -d "build/libs" ]; then
@@ -292,7 +311,14 @@ jobs:
           username: ubuntu
           key: ${{ steps.get_ssh_key.outputs.ssh_key }}
           port: 22
+          command_timeout: "20m"
+          envs: MOD_JAR_PATH
+          environment: |
+            MOD_JAR_PATH=${{ steps.build.outputs.mod_jar }}
           script: |
+            set -e
+            echo "Starting deployment..."
+            
             # Setup directories
             sudo mkdir -p /opt/minecraft/server
             sudo chown -R ubuntu:ubuntu /opt/minecraft
@@ -302,7 +328,9 @@ jobs:
             mkdir -p mods config
             
             # Download and install Minecraft + NeoForge
+            echo "Downloading NeoForge..."
             wget -q https://maven.neoforged.net/releases/net/neoforged/neoforge/1.21.1/neoforge-1.21.1-installer.jar
+            echo "Installing NeoForge..."
             java -jar neoforge-1.21.1-installer.jar --installServer
             
             # Accept EULA
@@ -341,13 +369,24 @@ jobs:
             EOF
             
             # Copy mod and config
-            cp ${{ steps.build.outputs.mod_jar }} mods/
+            echo "Copying mod file from: ${MOD_JAR_PATH}"
+            cp "${MOD_JAR_PATH}" mods/
             cp -r VoiceChatMod/runs/client/config/* config/
             
+            # Verify files
+            echo "Verifying installation..."
+            ls -la mods/
+            ls -la config/
+            
             # Reload systemd and start service
+            echo "Starting Minecraft server..."
             sudo systemctl daemon-reload
             sudo systemctl enable minecraft.service
             sudo systemctl start minecraft.service
+            
+            # Check service status
+            echo "Checking service status..."
+            sudo systemctl status minecraft.service
 
       - name: Update PR with Deployment Status
         if: always()
