@@ -221,79 +221,6 @@ jobs:
           echo "instance_ip=$INSTANCE_IP" >> $GITHUB_OUTPUT
           echo "✅ Successfully retrieved instance IP: $INSTANCE_IP"
 
-      - name: Get SSH Key from SSM
-        id: get_ssh_key
-        env:
-          WORKSPACE: ${{ steps.workspace.outputs.workspace }}
-        run: |
-          # Get the SSH key from SSM
-          SSH_KEY=$(aws ssm get-parameter \
-            --name "/minecraft/${WORKSPACE}/ssh_private_key" \
-            --with-decryption \
-            --query 'Parameter.Value' \
-            --output text || echo "")
-
-          if [ -z "$SSH_KEY" ]; then
-            echo "::error::Failed to retrieve SSH key from SSM"
-            exit 1
-          fi
-
-          # Remove any carriage returns and ensure proper line endings
-          SSH_KEY=$(echo "$SSH_KEY" | tr -d '\r')
-
-          # Verify it starts with proper SSH key format
-          if ! echo "$SSH_KEY" | grep -q "^-----BEGIN [A-Z ]\+ PRIVATE KEY-----"; then
-            echo "::error::Retrieved value is not in valid SSH key format"
-            exit 1
-          fi
-
-          # Verify it ends with proper SSH key format
-          if ! echo "$SSH_KEY" | grep -q "-----END [A-Z ]\+ PRIVATE KEY-----$"; then
-            echo "::error::Retrieved value is not in valid SSH key format"
-            exit 1
-          fi
-
-          # Create a temporary file for ssh-keygen verification
-          TEMP_KEY_FILE=$(mktemp)
-          echo "$SSH_KEY" > "$TEMP_KEY_FILE"
-          chmod 600 "$TEMP_KEY_FILE"
-
-          # Verify the key format using ssh-keygen
-          if ! ssh-keygen -l -f "$TEMP_KEY_FILE" &>/dev/null; then
-            shred -u "$TEMP_KEY_FILE"
-            echo "::error::Invalid SSH key format"
-            exit 1
-          fi
-          shred -u "$TEMP_KEY_FILE"
-
-          # Store the key in GitHub output with proper escaping
-          {
-            echo "ssh_key<<EOF"
-            echo "$SSH_KEY"
-            echo "EOF"
-          } >> "$GITHUB_OUTPUT"
-
-          echo "Successfully retrieved and validated SSH key"
-
-      - name: Setup SSH Key
-        run: |
-          # Create .ssh directory with correct permissions
-          mkdir -p ~/.ssh
-          chmod 700 ~/.ssh
-          
-          # Decode and save the key
-          echo "${{ steps.get_ssh_key.outputs.ssh_key }}" | base64 -d > ~/.ssh/id_rsa
-          chmod 600 ~/.ssh/id_rsa
-          
-          # Verify the key format
-          if ! ssh-keygen -l -f ~/.ssh/id_rsa &>/dev/null; then
-            shred -u ~/.ssh/id_rsa
-            echo "::error::Invalid SSH key format"
-            exit 1
-          fi
-          
-          echo "✅ SSH key setup completed successfully"
-
       - name: Update PR with Terraform Results
         uses: actions/github-script@v7.0.1
         if: always()
@@ -346,60 +273,6 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: us-east-1
 
-      - name: Get SSH Key from SSM
-        id: get_ssh_key
-        env:
-          WORKSPACE: ${{ steps.workspace.outputs.workspace }}
-        run: |
-          # Get the SSH key from SSM
-          SSH_KEY=$(aws ssm get-parameter \
-            --name "/minecraft/${WORKSPACE}/ssh_private_key" \
-            --with-decryption \
-            --query 'Parameter.Value' \
-            --output text || echo "")
-
-          if [ -z "$SSH_KEY" ]; then
-            echo "::error::Failed to retrieve SSH key from SSM"
-            exit 1
-          fi
-
-          # Remove any carriage returns and ensure proper line endings
-          SSH_KEY=$(echo "$SSH_KEY" | tr -d '\r')
-
-          # Verify it starts with proper SSH key format
-          if ! echo "$SSH_KEY" | grep -q "^-----BEGIN [A-Z ]\+ PRIVATE KEY-----"; then
-            echo "::error::Retrieved value is not in valid SSH key format"
-            exit 1
-          fi
-
-          # Verify it ends with proper SSH key format
-          if ! echo "$SSH_KEY" | grep -q "-----END [A-Z ]\+ PRIVATE KEY-----$"; then
-            echo "::error::Retrieved value is not in valid SSH key format"
-            exit 1
-          fi
-
-          # Create a temporary file for ssh-keygen verification
-          TEMP_KEY_FILE=$(mktemp)
-          echo "$SSH_KEY" > "$TEMP_KEY_FILE"
-          chmod 600 "$TEMP_KEY_FILE"
-
-          # Verify the key format using ssh-keygen
-          if ! ssh-keygen -l -f "$TEMP_KEY_FILE" &>/dev/null; then
-            shred -u "$TEMP_KEY_FILE"
-            echo "::error::Invalid SSH key format"
-            exit 1
-          fi
-          shred -u "$TEMP_KEY_FILE"
-
-          # Store the key in GitHub output with proper escaping
-          {
-            echo "ssh_key<<EOF"
-            echo "$SSH_KEY"
-            echo "EOF"
-          } >> "$GITHUB_OUTPUT"
-
-          echo "Successfully retrieved and validated SSH key"
-
       - uses: actions/checkout@v4.1.1
         with:
           repository: LeChienCour/VoiceChatMod
@@ -425,6 +298,47 @@ jobs:
             exit 1
           fi
           echo "mod_jar=$MOD_JAR" >> $GITHUB_OUTPUT
+
+      - name: Get SSH Key from SSM
+        id: get_ssh_key
+        env:
+          WORKSPACE: ${{ steps.workspace.outputs.workspace }}
+        run: |
+          # Wait for SSM parameter to be available (it's created by Terraform)
+          MAX_ATTEMPTS=5
+          ATTEMPT=1
+          while [ $ATTEMPT -le $MAX_ATTEMPTS ]; do
+            echo "Attempt $ATTEMPT to retrieve SSH key from SSM..."
+            
+            # Try to get the parameter
+            if SSH_KEY=$(aws ssm get-parameter \
+              --name "/minecraft/${WORKSPACE}/ssh_private_key" \
+              --with-decryption \
+              --query 'Parameter.Value' \
+              --output text 2>/dev/null); then
+              
+              # Store key directly in output
+              {
+                echo "ssh_key<<EOF"
+                echo "$SSH_KEY"
+                echo "EOF"
+              } >> "$GITHUB_OUTPUT"
+              
+              echo "Successfully retrieved SSH key from SSM"
+              break
+            fi
+            
+            # If we've reached max attempts, fail
+            if [ $ATTEMPT -eq $MAX_ATTEMPTS ]; then
+              echo "::error::Failed to retrieve SSH key after $MAX_ATTEMPTS attempts"
+              exit 1
+            fi
+            
+            # Wait before next attempt
+            echo "Key not found, waiting 10 seconds before retry..."
+            sleep 10
+            ATTEMPT=$((ATTEMPT + 1))
+          done
 
       - name: Deploy and Verify
         id: deploy
