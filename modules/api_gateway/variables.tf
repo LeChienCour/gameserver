@@ -1,5 +1,5 @@
 variable "prefix" {
-  description = "Prefix for resource names"
+  description = "Prefix to be used in resource names"
   type        = string
 }
 
@@ -10,13 +10,12 @@ variable "environment" {
 }
 
 variable "stage_name" {
-  description = "Name of the WebSocket stage"
+  description = "Name of the API Gateway stage"
   type        = string
-  default     = "prod"
 }
 
 variable "cloudwatch_role_arn" {
-  description = "ARN of the IAM role for CloudWatch logging"
+  description = "ARN of the CloudWatch role for API Gateway"
   type        = string
 }
 
@@ -46,16 +45,36 @@ variable "quota_limit" {
 
 # Lambda ARNs for WebSocket integrations
 variable "lambda_connect_arn" {
-  description = "ARN of the connect Lambda function"
+  description = "ARN of the Lambda function for WebSocket connect"
   type        = string
 }
 
 variable "lambda_disconnect_arn" {
-  description = "ARN of the disconnect Lambda function"
+  description = "ARN of the Lambda function for WebSocket disconnect"
   type        = string
 }
 
 variable "lambda_message_arn" {
-  description = "ARN of the message Lambda function"
+  description = "ARN of the Lambda function for WebSocket message handling"
   type        = string
+}
+
+variable "vpc_endpoint_id" {
+  description = "ID of the VPC Endpoint for API Gateway"
+  type        = string
+}
+
+variable "vpc_id" {
+  description = "ID of the VPC"
+  type        = string
+}
+
+variable "security_groups" {
+  description = "List of security group IDs for the API Gateway VPC endpoint"
+  type        = list(string)
+}
+
+variable "subnet_ids" {
+  description = "List of subnet IDs for the API Gateway VPC endpoint"
+  type        = list(string)
 } 

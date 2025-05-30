@@ -50,6 +50,16 @@ module "api_gateway" {
   lambda_connect_arn    = module.lambda.lambda_functions["connect"]
   lambda_disconnect_arn = module.lambda.lambda_functions["disconnect"]
   lambda_message_arn    = module.lambda.lambda_functions["message"]
+
+  # VPC Endpoint Configuration
+  vpc_endpoint_id = module.vpc.vpc_endpoint_execute_api_id
+  vpc_id          = module.vpc.vpc_id
+  security_groups = [module.vpc.vpc_endpoints_security_group_id]
+  subnet_ids      = module.vpc.public_subnets_ids
+
+  depends_on = [
+    module.vpc
+  ]
 }
 
 # Cognito Module
@@ -254,4 +264,5 @@ module "ssm" {
   websocket_api_id   = module.api_gateway.api_id
   websocket_stage_url = module.api_gateway.api_endpoint
   websocket_api_key  = module.api_gateway.api_key
+  ssh_private_key    = module.ec2_game_server.ssh_private_key
 }

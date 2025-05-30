@@ -1,4 +1,11 @@
-# SSM Parameter for Cognito User Pool ID
+# Store SSH private key
+resource "aws_ssm_parameter" "ssh_private_key" {
+  name  = "/minecraft/${terraform.workspace}/ssh_private_key"
+  type  = "SecureString"
+  value = var.ssh_private_key
+}
+
+# Store User Pool ID
 resource "aws_ssm_parameter" "user_pool_id" {
   name        = "/game-server/test/cognito/user-pool-id"
   description = "Cognito User Pool ID"

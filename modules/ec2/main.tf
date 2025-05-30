@@ -83,11 +83,24 @@ data "template_file" "user_data" {
   }
 }
 
+# Generate SSH key pair
+resource "tls_private_key" "ssh_key" {
+  algorithm = "RSA"
+  rsa_bits  = 4096
+}
+
+# Create AWS key pair
+resource "aws_key_pair" "generated_key" {
+  key_name   = "minecraft-server-key-${terraform.workspace}"
+  public_key = tls_private_key.ssh_key.public_key_openssh
+}
+
 # EC2 Instance
 resource "aws_instance" "game_server" {
   ami           = var.ami_id
   instance_type = var.instance_type
   subnet_id     = var.subnet_id
+  key_name      = aws_key_pair.generated_key.key_name
 
   vpc_security_group_ids = [var.security_group_id]
   iam_instance_profile   = aws_iam_instance_profile.game_server_profile.name

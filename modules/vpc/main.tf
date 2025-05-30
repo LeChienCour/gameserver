@@ -47,3 +47,39 @@ resource "aws_route_table_association" "public" {
   subnet_id      = aws_subnet.public[count.index].id
   route_table_id = aws_route_table.public.id
 }
+
+# VPC Endpoints Security Group
+resource "aws_security_group" "vpc_endpoints" {
+  name        = "vpc-endpoints-sg"
+  description = "Security group for VPC endpoints"
+  vpc_id      = aws_vpc.main.id
+
+  ingress {
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
+    cidr_blocks = [aws_vpc.main.cidr_block]
+  }
+
+  tags = {
+    Name = "vpc-endpoints-sg"
+  }
+}
+
+# API Gateway VPC Endpoint
+resource "aws_vpc_endpoint" "execute_api" {
+  vpc_id             = aws_vpc.main.id
+  service_name       = "com.amazonaws.${data.aws_region.current.name}.execute-api"
+  vpc_endpoint_type  = "Interface"
+  subnet_ids         = aws_subnet.public[*].id
+  security_group_ids = [aws_security_group.vpc_endpoints.id]
+
+  private_dns_enabled = true
+
+  tags = {
+    Name = "apigateway-endpoint"
+  }
+}
+
+# Get current region
+data "aws_region" "current" {}
