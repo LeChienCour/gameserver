@@ -278,41 +278,6 @@ jobs:
           cat test.log >> $GITHUB_ENV
           echo "EOF" >> $GITHUB_ENV
 
-      - name: Upload to S3
-        if: success()
-        env:
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          ATTEMPT_NUMBER: ${{ github.run_attempt }}
-        run: |
-          # Find the main jar file (excluding sources and javadoc)
-          JAR_FILE=$(find mod_source/build/libs/ -name "*.jar" ! -name "*-sources.jar" ! -name "*-javadoc.jar")
-          
-          if [ -z "$JAR_FILE" ]; then
-            echo "❌ No jar file found to upload"
-            exit 1
-          fi
-          
-          # Extract just the filename
-          FILENAME=$(basename "$JAR_FILE")
-          
-          # Create S3 path with PR and attempt numbers
-          S3_PATH="pr-${PR_NUMBER}/attempt-${ATTEMPT_NUMBER}/${FILENAME}"
-          
-          echo "📦 Uploading $FILENAME to S3..."
-          echo "🎯 Target: s3://voice-chat-mod-minecraft-1.21.4/$S3_PATH"
-          
-          # Upload to S3
-          aws s3 cp "$JAR_FILE" "s3://voice-chat-mod-minecraft-1.21.4/$S3_PATH"
-          
-          # Verify upload
-          if aws s3 ls "s3://voice-chat-mod-minecraft-1.21.4/$S3_PATH" > /dev/null 2>&1; then
-            echo "✅ Upload successful"
-            echo "s3_artifact_path=$S3_PATH" >> $GITHUB_ENV
-          else
-            echo "❌ Upload failed"
-            exit 1
-          fi
-
       - name: Update PR with Build Results
         uses: actions/github-script@v7.0.1
         if: always()
@@ -383,19 +348,73 @@ jobs:
             cd /opt/minecraft/server
             mkdir -p VoiceChatMod/runs/client/config mods
             
-            # Install NeoForge
+            # Download and install Minecraft + NeoForge
             wget -q https://maven.neoforged.net/releases/net/neoforged/neoforge/1.21.1/neoforge-1.21.1-installer.jar
             java -jar neoforge-1.21.1-installer.jar --installServer
             
-            # Download mod
-            aws s3 cp s3://voice-chat-mod-minecraft-1.21.4/${{ env.s3_artifact_path }} mods/
+            # Accept EULA
+            echo "eula=true" > eula.txt
             
-            # Copy config
-            aws s3 cp s3://voice-chat-mod-minecraft-1.21.4/config/voicechat-common.toml VoiceChatMod/runs/client/config/
+            # Create server.properties
+            cat > server.properties << 'EOF'
+            server-port=25565
+            max-players=20
+            difficulty=normal
+            level-name=world
+            gamemode=survival
+            enable-command-block=true
+            motd=Test Minecraft Server
+            spawn-protection=0
+            EOF
             
-            # Start service
+            # Create systemd service file
+            sudo tee /etc/systemd/system/minecraft.service << 'EOF'
+            [Unit]
+            Description=Minecraft Server
+            After=network.target
+            
+            [Service]
+            WorkingDirectory=/opt/minecraft/server
+            User=ubuntu
+            Group=ubuntu
+            
+            ExecStart=/bin/sh -c 'java -Xmx2G -Xms1G @user_jvm_args.txt @libraries/net/neoforged/forge/1.21.1/unix_args.txt nogui'
+            
+            Restart=on-failure
+            RestartSec=5
+            
+            [Install]
+            WantedBy=multi-user.target
+            EOF
+            
+            # Create config file
+            cat > VoiceChatMod/runs/client/config/voicechat-common.toml << 'EOF'
+            enableVoiceChat = true
+            defaultVolume = 0.7
+            maxVoiceDistance = 64
+            reconnectionAttempts = 3
+            reconnectionDelay = 5
+            websocketStageUrl = "${{ secrets.WEBSOCKET_STAGE_URL }}"
+            websocketApiKey = "${{ secrets.WEBSOCKET_API_KEY }}"
+            userPoolId = "${{ secrets.USER_POOL_ID }}"
+            userPoolClientId = "${{ secrets.USER_POOL_CLIENT_ID }}"
+            selectedMicrophone = ""
+            useSystemDefaultMic = true
+            microphoneBoost = 1.0
+            EOF
+            
+            # Reload systemd and start service
+            sudo systemctl daemon-reload
             sudo systemctl enable minecraft.service
             sudo systemctl start minecraft.service
+            
+            # Wait for server to start and check logs
+            sleep 30
+            if ! grep -q "Done" logs/latest.log 2>/dev/null; then
+              echo "Server failed to start properly"
+              cat logs/latest.log
+              exit 1
+            fi
 
       - name: Verify Deployment
         uses: appleboy/ssh-action@v1.0.3
