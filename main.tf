@@ -204,6 +204,7 @@ module "security_groups" {
   security_group_name = var.security_group_name
   allowed_game_ips    = ["0.0.0.0/0"]
   game_protocol       = var.game_protocol
+  vpc_endpoints_security_group_id = module.vpc.vpc_endpoints_security_group_id
 }
 
 # Storage Resources

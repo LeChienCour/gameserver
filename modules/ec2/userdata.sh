@@ -9,6 +9,16 @@ echo "[$(date +%Y-%m-%d_%H:%M:%S)] Iniciando configuración del servidor Minecra
 echo "[$(date +%Y-%m-%d_%H:%M:%S)] Actualizando el sistema..."
 apt update && apt upgrade -y
 
+# Install AWS SSM Agent
+echo "[$(date +%Y-%m-%d_%H:%M:%S)] Installing AWS SSM Agent..."
+snap install amazon-ssm-agent --classic
+systemctl enable snap.amazon-ssm-agent.amazon-ssm-agent.service
+systemctl start snap.amazon-ssm-agent.amazon-ssm-agent.service
+
+# Verify SSM Agent status
+echo "[$(date +%Y-%m-%d_%H:%M:%S)] Verifying SSM Agent status..."
+systemctl status snap.amazon-ssm-agent.amazon-ssm-agent.service
+
 # Instalar Java 21 (headless)
 echo "[$(date +%Y-%m-%d_%H:%M:%S)] Instalando Java 21..."
 apt install openjdk-21-jdk-headless -y

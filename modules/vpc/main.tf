@@ -14,6 +14,7 @@ resource "aws_subnet" "public" {
   vpc_id            = aws_vpc.main.id
   cidr_block        = element(var.public_subnets_cidr, count.index)
   availability_zone = element(var.availability_zones, count.index)
+  map_public_ip_on_launch = true  # Enable auto-assign public IP
 
   tags = {
     Name = "${var.vpc_name}-public-${count.index + 1}"
@@ -61,12 +62,62 @@ resource "aws_security_group" "vpc_endpoints" {
     cidr_blocks = [aws_vpc.main.cidr_block]
   }
 
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
   tags = {
     Name = "vpc-endpoints-sg"
   }
 }
 
-# API Gateway VPC Endpoint
+# SSM VPC Endpoints - All three are required for Systems Manager functionality
+resource "aws_vpc_endpoint" "ssm" {
+  vpc_id             = aws_vpc.main.id
+  service_name       = "com.amazonaws.${data.aws_region.current.name}.ssm"
+  vpc_endpoint_type  = "Interface"
+  subnet_ids         = aws_subnet.public[*].id
+  security_group_ids = [aws_security_group.vpc_endpoints.id]
+
+  private_dns_enabled = true
+
+  tags = {
+    Name = "ssm-endpoint"
+  }
+}
+
+resource "aws_vpc_endpoint" "ssmmessages" {
+  vpc_id             = aws_vpc.main.id
+  service_name       = "com.amazonaws.${data.aws_region.current.name}.ssmmessages"
+  vpc_endpoint_type  = "Interface"
+  subnet_ids         = aws_subnet.public[*].id
+  security_group_ids = [aws_security_group.vpc_endpoints.id]
+
+  private_dns_enabled = true
+
+  tags = {
+    Name = "ssmmessages-endpoint"
+  }
+}
+
+resource "aws_vpc_endpoint" "ec2messages" {
+  vpc_id             = aws_vpc.main.id
+  service_name       = "com.amazonaws.${data.aws_region.current.name}.ec2messages"
+  vpc_endpoint_type  = "Interface"
+  subnet_ids         = aws_subnet.public[*].id
+  security_group_ids = [aws_security_group.vpc_endpoints.id]
+
+  private_dns_enabled = true
+
+  tags = {
+    Name = "ec2messages-endpoint"
+  }
+}
+
+# API Gateway VPC Endpoint - Required for WebSocket communication
 resource "aws_vpc_endpoint" "execute_api" {
   vpc_id             = aws_vpc.main.id
   service_name       = "com.amazonaws.${data.aws_region.current.name}.execute-api"
