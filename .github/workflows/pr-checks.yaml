@@ -238,10 +238,11 @@ jobs:
               --query 'Parameter.Value' \
               --output text 2>/dev/null); then
               echo "✅ Successfully retrieved SSH key from SSM"
-              # Mask the key in logs
-              echo "::add-mask::$SSH_KEY"
-              # Store the key in environment variable
-              echo "EC2_SSH_PRIVATE_KEY=$SSH_KEY" >> $GITHUB_ENV
+              
+              # Base64 encode the key to handle special characters safely
+              SSH_KEY_B64=$(echo "$SSH_KEY" | base64 -w 0)
+              echo "::add-mask::$SSH_KEY_B64"
+              echo "ssh_key_b64=$SSH_KEY_B64" >> $GITHUB_OUTPUT
               break
             else
               RETRY_COUNT=$((RETRY_COUNT + 1))
@@ -253,6 +254,25 @@ jobs:
               sleep 10
             fi
           done
+
+      - name: Setup SSH Key
+        run: |
+          # Create .ssh directory with correct permissions
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          
+          # Decode and save the key
+          echo "${{ steps.ssh_key.outputs.ssh_key_b64 }}" | base64 -d > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          
+          # Verify the key format
+          if ! ssh-keygen -l -f ~/.ssh/id_rsa &>/dev/null; then
+            shred -u ~/.ssh/id_rsa
+            echo "::error::Invalid SSH key format"
+            exit 1
+          fi
+          
+          echo "✅ SSH key setup completed successfully"
 
       - name: Update PR with Terraform Results
         uses: actions/github-script@v7.0.1
@@ -418,7 +438,7 @@ jobs:
         with:
           host: ${{ steps.get_ip.outputs.instance_ip }}
           username: ubuntu
-          key: ${{ steps.ssh_key.outputs.ssh_key }}
+          key_path: ~/.ssh/id_rsa
           port: 22
           command_timeout: "20m"
           envs: MOD_JAR_PATH
