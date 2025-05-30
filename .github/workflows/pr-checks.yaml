@@ -491,7 +491,7 @@ jobs:
           # Create backend config
           cat > backend.hcl << EOF
           bucket         = "${{ secrets.TF_STATE_BUCKET }}"
-          key            = "pr-environments/${{ steps.workspace.outputs.workspace }}/terraform.tfstate"
+          key            = "terraform.tfstate"
           region         = "us-east-1"
           dynamodb_table = "${{ secrets.TF_LOCK_TABLE }}"
           encrypt        = true

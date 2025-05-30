@@ -76,7 +76,7 @@ jobs:
         run: |
           cat > backend.hcl << EOF
           bucket         = "$TF_STATE_BUCKET"
-          key            = "prod/terraform.tfstate"  # Production state file
+          key            = "terraform.tfstate"
           region         = "us-east-1"
           dynamodb_table = "$TF_LOCK_TABLE"
           encrypt        = true
