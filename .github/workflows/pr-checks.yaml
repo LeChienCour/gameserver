@@ -333,15 +333,39 @@ jobs:
         run: |
           echo "Starting deployment using AWS Systems Manager..."
           
-          # Ensure script has Unix line endings
-          sed -i 's/\r$//' .github/scripts/deploy.sh
-          
-          # Run command through Session Manager
-          SCRIPT_CONTENT=$(cat .github/scripts/deploy.sh)
+          # First, copy the mod file to the instance
           aws ssm send-command \
             --instance-ids "$INSTANCE_ID" \
             --document-name "AWS-RunShellScript" \
-            --parameters "commands=[\"$SCRIPT_CONTENT\"]" \
+            --parameters 'commands=["mkdir -p /opt/minecraft/server/mods"]' \
+            --output text \
+            --query "Command.CommandId" > prep_command_id.txt
+          
+          # Wait for the preparation command to complete
+          while true; do
+            STATUS=$(aws ssm list-command-invocations \
+              --command-id "$(cat prep_command_id.txt)" \
+              --details \
+              --query "CommandInvocations[0].Status" \
+              --output text)
+            
+            if [[ "$STATUS" == "Success" ]]; then
+              break
+            elif [[ "$STATUS" == "Failed" || "$STATUS" == "Cancelled" || "$STATUS" == "TimedOut" ]]; then
+              echo "Error: Directory creation failed with status: $STATUS"
+              exit 1
+            fi
+            sleep 5
+          done
+          
+          # Convert the script to Unix line endings and escape it for JSON
+          SCRIPT_CONTENT=$(cat .github/scripts/deploy.sh | tr -d '\r' | sed 's/"/\\"/g')
+          
+          # Run deployment script through SSM
+          aws ssm send-command \
+            --instance-ids "$INSTANCE_ID" \
+            --document-name "AWS-RunShellScript" \
+            --parameters "{\"commands\":[\"echo '$SCRIPT_CONTENT' > /tmp/deploy.sh\",\"chmod +x /tmp/deploy.sh\",\"sudo /tmp/deploy.sh\"]}" \
             --output text \
             --query "Command.CommandId" > command_id.txt
           
