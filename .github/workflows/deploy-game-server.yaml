@@ -17,6 +17,7 @@ on:
 permissions:
   contents: read    # For repository checkout
   id-token: write  # For AWS authentication
+  deployments: write # For deployment status
 
 jobs:
   # First job: Deploy infrastructure using Terraform
@@ -182,6 +183,14 @@ jobs:
     needs: [terraform_deploy]  # Wait for infrastructure
     runs-on: ubuntu-latest
     steps:
+      # Set up AWS credentials first
+      - name: Set up AWS CLI
+        uses: aws-actions/configure-aws-credentials@v4.0.2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+
       # Get mod source code
       - uses: actions/checkout@v4.1.1
         with:
@@ -325,6 +334,15 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          # Create deployment first
+          DEPLOY_ID=$(gh api \
+            --method POST \
+            /repos/${{ github.repository }}/deployments \
+            -f ref="${{ github.sha }}" \
+            -f environment="production" \
+            -f description="Deploying to production" \
+            --jq '.id')
+
           # Create deployment status
           STATUS="${{ steps.deploy.outcome }}"
           if [ "$STATUS" = "success" ]; then
@@ -335,10 +353,10 @@ jobs:
             STATE="failure"
           fi
           
-          # Create a deployment status
+          # Update the deployment status
           gh api \
             --method POST \
-            /repos/${{ github.repository }}/deployments/statuses/${{ github.run_id }} \
+            /repos/${{ github.repository }}/deployments/$DEPLOY_ID/statuses \
             -f state="$STATE" \
             -f description="$MESSAGE" \
             -f environment="production" \

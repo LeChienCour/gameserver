@@ -4,7 +4,10 @@ on:
   pull_request:
     branches:
       - main
-    types: [opened, synchronize, reopened, closed]
+    types: [opened, synchronize, reopened]
+    # Prevent running on merge commits
+    paths-ignore:
+      - '.github/workflows/deploy-game-server.yaml'
 
 # Global minimum permissions
 permissions: read-all
@@ -452,7 +455,6 @@ jobs:
     if: |
       always() && 
       (
-        github.event.action == 'closed' || 
         needs.terraform_deploy.result == 'failure' ||
         needs.deploy_mod.result == 'failure' ||
         (needs.terraform_deploy.result == 'success' && needs.deploy_mod.result == 'success')
