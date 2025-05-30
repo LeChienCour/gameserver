@@ -222,38 +222,32 @@ jobs:
           echo "✅ Successfully retrieved instance IP: $INSTANCE_IP"
 
       - name: Get SSH Key from SSM
-        id: ssh_key
+        id: get_ssh_key
+        env:
+          WORKSPACE: ${{ steps.workspace.outputs.workspace }}
         run: |
-          # Get the workspace name
-          WORKSPACE=$(terraform workspace show)
-          echo "Using workspace: $WORKSPACE"
+          # Get and store key securely
+          SSH_KEY=$(aws ssm get-parameter \
+            --name "/minecraft/${WORKSPACE}/ssh_private_key" \
+            --with-decryption \
+            --query 'Parameter.Value' \
+            --output text)
           
-          # Try to get the SSH key with retries
-          MAX_RETRIES=5
-          RETRY_COUNT=0
-          while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
-            if SSH_KEY=$(aws ssm get-parameter \
-              --name "/minecraft/${WORKSPACE}/ssh_private_key" \
-              --with-decryption \
-              --query 'Parameter.Value' \
-              --output text 2>/dev/null); then
-              echo "✅ Successfully retrieved SSH key from SSM"
-              
-              # Base64 encode the key to handle special characters safely
-              SSH_KEY_B64=$(echo "$SSH_KEY" | base64 -w 0)
-              echo "::add-mask::$SSH_KEY_B64"
-              echo "ssh_key_b64=$SSH_KEY_B64" >> $GITHUB_OUTPUT
-              break
-            else
-              RETRY_COUNT=$((RETRY_COUNT + 1))
-              if [ $RETRY_COUNT -eq $MAX_RETRIES ]; then
-                echo "::error::Failed to retrieve SSH key after $MAX_RETRIES attempts"
-                exit 1
-              fi
-              echo "Attempt $RETRY_COUNT failed, waiting 10 seconds before retry..."
-              sleep 10
-            fi
-          done
+          # Verify key format
+          echo "$SSH_KEY" > /tmp/temp_key
+          if ! ssh-keygen -l -f /tmp/temp_key &>/dev/null; then
+            shred -u /tmp/temp_key
+            echo "::error::Invalid SSH key format"
+            exit 1
+          fi
+          shred -u /tmp/temp_key
+          
+          # Store key in output
+          {
+            echo "ssh_key<<EOF"
+            echo "$SSH_KEY"
+            echo "EOF"
+          } >> $GITHUB_OUTPUT
 
       - name: Setup SSH Key
         run: |
@@ -262,7 +256,7 @@ jobs:
           chmod 700 ~/.ssh
           
           # Decode and save the key
-          echo "${{ steps.ssh_key.outputs.ssh_key_b64 }}" | base64 -d > ~/.ssh/id_rsa
+          echo "${{ steps.get_ssh_key.outputs.ssh_key }}" | base64 -d > ~/.ssh/id_rsa
           chmod 600 ~/.ssh/id_rsa
           
           # Verify the key format
@@ -331,25 +325,28 @@ jobs:
         env:
           WORKSPACE: ${{ steps.workspace.outputs.workspace }}
         run: |
-          # Create secure SSH directory
-          mkdir -p ~/.ssh
-          chmod 700 ~/.ssh
-          
           # Get and store key securely
-          aws ssm get-parameter \
+          SSH_KEY=$(aws ssm get-parameter \
             --name "/minecraft/${WORKSPACE}/ssh_private_key" \
             --with-decryption \
             --query 'Parameter.Value' \
-            --output text > ~/.ssh/id_rsa
+            --output text)
           
-          chmod 600 ~/.ssh/id_rsa
-          
-          # Verify key and fail fast if invalid
-          if ! ssh-keygen -l -f ~/.ssh/id_rsa &>/dev/null; then
-            shred -u ~/.ssh/id_rsa
+          # Verify key format
+          echo "$SSH_KEY" > /tmp/temp_key
+          if ! ssh-keygen -l -f /tmp/temp_key &>/dev/null; then
+            shred -u /tmp/temp_key
             echo "::error::Invalid SSH key format"
             exit 1
           fi
+          shred -u /tmp/temp_key
+          
+          # Store key in output
+          {
+            echo "ssh_key<<EOF"
+            echo "$SSH_KEY"
+            echo "EOF"
+          } >> $GITHUB_OUTPUT
 
       - uses: actions/checkout@v4.1.1
         with:
@@ -383,7 +380,7 @@ jobs:
         with:
           host: ${{ needs.terraform_deploy.outputs.instance_ip }}
           username: ubuntu
-          key_path: ~/.ssh/id_rsa
+          key: ${{ steps.get_ssh_key.outputs.ssh_key }}
           port: 22
           script: |
             set -e
