@@ -378,11 +378,13 @@ jobs:
 
       - name: Deploy and Verify
         id: deploy
+        env:
+          SSH_KEY_BASE64: ${{ steps.get_ssh_key.outputs.ssh_key_base64 }}
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ needs.terraform_deploy.outputs.instance_ip }}
           username: ubuntu
-          key: ${{ steps.get_ssh_key.outputs.ssh_key_base64 | base64_decode }}
+          key: ${{ steps.get_ssh_key.outputs.ssh_key_base64 }}
           port: 22
           debug: true
           script: |
