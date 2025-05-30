@@ -336,14 +336,14 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
-            const buildStatus = '${{ steps.build.outcome }}' === 'success' ? '✅' : '❌';
+            const buildStatus = '${{ steps.build.outcome }}' == 'success' ? '✅' : '❌';
             const output = `### Mod Deployment Status ${buildStatus}
             
             **Steps:**
             - Build and Test: ${buildStatus}
-            - Server Configuration: ${{ steps.deploy.outcome === 'success' ? '✅' : '❌' }}
+            - Server Configuration: ${{ steps.deploy.outcome == 'success' ? '✅' : '❌' }}
             
-            ${buildStatus === '✅' ? '✅ Mod successfully deployed to server' : '❌ Deployment failed - check workflow logs for details'}`;
+            ${buildStatus == '✅' ? '✅ Mod successfully deployed to server' : '❌ Deployment failed - check workflow logs for details'}`;
             
             await github.rest.pulls.createReview({
               owner: context.repo.owner,
