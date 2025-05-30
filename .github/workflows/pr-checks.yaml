@@ -82,21 +82,6 @@ jobs:
           echo "Generated backend configuration:"
           cat backend.hcl
 
-      - name: Validate Terraform Files
-        run: |
-          echo "Validating Terraform files..."
-          terraform validate 2>&1 | tee validate.log
-          VALIDATE_EXIT_CODE=${PIPESTATUS[0]}
-          
-          if [ $VALIDATE_EXIT_CODE -ne 0 ]; then
-            echo "::error::Terraform validation failed"
-            echo "Validation errors:"
-            cat validate.log
-            exit 1
-          fi
-          
-          echo "✅ Terraform validation successful"
-
       - name: Terraform Init with Backend Config
         id: init
         run: |
@@ -128,6 +113,21 @@ jobs:
           fi
           
           echo "✅ Terraform initialization completed successfully"
+
+      - name: Validate Terraform Files
+        run: |
+          echo "Validating Terraform files..."
+          terraform validate 2>&1 | tee validate.log
+          VALIDATE_EXIT_CODE=${PIPESTATUS[0]}
+          
+          if [ $VALIDATE_EXIT_CODE -ne 0 ]; then
+            echo "::error::Terraform validation failed"
+            echo "Validation errors:"
+            cat validate.log
+            exit 1
+          fi
+          
+          echo "✅ Terraform validation successful"
 
       - name: Terraform Format Check
         id: fmt
