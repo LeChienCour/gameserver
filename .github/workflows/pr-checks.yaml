@@ -447,12 +447,6 @@ jobs:
               body: finalSummary
             });
 
-      - name: Cleanup
-        if: always()
-        run: |
-          # Securely remove SSH key
-          shred -u ~/.ssh/id_rsa
-
   cleanup_infrastructure:
     needs: [terraform_deploy, deploy_mod]
     if: |
