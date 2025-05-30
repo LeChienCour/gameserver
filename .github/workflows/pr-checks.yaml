@@ -390,6 +390,7 @@ jobs:
         working-directory: ./mod_source
         run: |
           chmod +x ./gradlew
+          
           # Clean the project first
           ./gradlew clean
           
@@ -398,16 +399,29 @@ jobs:
             --no-daemon \
             --parallel \
             --stacktrace \
-            --warning-mode=summary \
+            --warning-mode=all \
             -Dorg.gradle.java.installations.auto-download=false \
             -Porg.gradle.java.installations.paths=/opt/hostedtoolcache/Java_Temurin-Hotspot_jdk/17.0.15-6/x64 \
-            -Dorg.gradle.warning.mode=none \
-            -x neoFormApplyParchment
+            -Dorg.gradle.warning.mode=all \
+            -Dorg.gradle.caching=true \
+            -Dorg.gradle.configuration-cache=true \
+            -x neoFormApplyParchment \
+            -x neoFormUnzipSources \
+            -x neoFormDownloadParchment
           
           # Verify build output
           if [ -d "build/libs" ]; then
             echo "✅ Build artifacts created successfully"
-            echo "mod_jar=$(ls build/libs/*-all.jar | head -n1)" >> $GITHUB_OUTPUT
+            # Find the jar that doesn't end with -sources.jar or -dev.jar
+            MOD_JAR=$(find build/libs -type f -name "*.jar" ! -name "*-sources.jar" ! -name "*-dev.jar" | head -n1)
+            if [ -n "$MOD_JAR" ]; then
+              echo "mod_jar=$MOD_JAR" >> $GITHUB_OUTPUT
+              echo "Found mod jar: $MOD_JAR"
+            else
+              echo "❌ Error: No suitable mod jar found in build/libs"
+              ls -la build/libs
+              exit 1
+            fi
           else
             echo "❌ Error: No build artifacts found!"
             exit 1
