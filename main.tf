@@ -196,14 +196,14 @@ data "archive_file" "validate_audio_function" {
 
 # Security Groups Module
 module "security_groups" {
-  source              = "./modules/security_groups"
-  vpc_id              = module.vpc.vpc_id
-  game_port           = var.game_port
-  websocket_port      = var.websocket_port
-  ssh_cidr            = var.ssh_cidr
-  security_group_name = var.security_group_name
-  allowed_game_ips    = ["0.0.0.0/0"]
-  game_protocol       = var.game_protocol
+  source                          = "./modules/security_groups"
+  vpc_id                          = module.vpc.vpc_id
+  game_port                       = var.game_port
+  websocket_port                  = var.websocket_port
+  ssh_cidr                        = var.ssh_cidr
+  security_group_name             = var.security_group_name
+  allowed_game_ips                = ["0.0.0.0/0"]
+  game_protocol                   = var.game_protocol
   vpc_endpoints_security_group_id = module.vpc.vpc_endpoints_security_group_id
 }
 
