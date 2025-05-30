@@ -454,7 +454,8 @@ jobs:
       (
         github.event.action == 'closed' || 
         needs.terraform_deploy.result == 'failure' ||
-        needs.deploy_mod.result == 'failure'
+        needs.deploy_mod.result == 'failure' ||
+        (needs.terraform_deploy.result == 'success' && needs.deploy_mod.result == 'success')
       )
     runs-on: ubuntu-latest
     permissions:
