@@ -226,28 +226,54 @@ jobs:
         env:
           WORKSPACE: ${{ steps.workspace.outputs.workspace }}
         run: |
-          # Get and store key securely
+          # Get the SSH key from SSM
           SSH_KEY=$(aws ssm get-parameter \
             --name "/minecraft/${WORKSPACE}/ssh_private_key" \
             --with-decryption \
             --query 'Parameter.Value' \
-            --output text)
-          
-          # Verify key format
-          echo "$SSH_KEY" > /tmp/temp_key
-          if ! ssh-keygen -l -f /tmp/temp_key &>/dev/null; then
-            shred -u /tmp/temp_key
+            --output text || echo "")
+
+          if [ -z "$SSH_KEY" ]; then
+            echo "::error::Failed to retrieve SSH key from SSM"
+            exit 1
+          fi
+
+          # Remove any carriage returns and ensure proper line endings
+          SSH_KEY=$(echo "$SSH_KEY" | tr -d '\r')
+
+          # Verify it starts with proper SSH key format
+          if ! echo "$SSH_KEY" | grep -q "^-----BEGIN [A-Z ]\+ PRIVATE KEY-----"; then
+            echo "::error::Retrieved value is not in valid SSH key format"
+            exit 1
+          fi
+
+          # Verify it ends with proper SSH key format
+          if ! echo "$SSH_KEY" | grep -q "-----END [A-Z ]\+ PRIVATE KEY-----$"; then
+            echo "::error::Retrieved value is not in valid SSH key format"
+            exit 1
+          fi
+
+          # Create a temporary file for ssh-keygen verification
+          TEMP_KEY_FILE=$(mktemp)
+          echo "$SSH_KEY" > "$TEMP_KEY_FILE"
+          chmod 600 "$TEMP_KEY_FILE"
+
+          # Verify the key format using ssh-keygen
+          if ! ssh-keygen -l -f "$TEMP_KEY_FILE" &>/dev/null; then
+            shred -u "$TEMP_KEY_FILE"
             echo "::error::Invalid SSH key format"
             exit 1
           fi
-          shred -u /tmp/temp_key
-          
-          # Store key in output
+          shred -u "$TEMP_KEY_FILE"
+
+          # Store the key in GitHub output with proper escaping
           {
             echo "ssh_key<<EOF"
             echo "$SSH_KEY"
             echo "EOF"
-          } >> $GITHUB_OUTPUT
+          } >> "$GITHUB_OUTPUT"
+
+          echo "Successfully retrieved and validated SSH key"
 
       - name: Setup SSH Key
         run: |
@@ -325,28 +351,54 @@ jobs:
         env:
           WORKSPACE: ${{ steps.workspace.outputs.workspace }}
         run: |
-          # Get and store key securely
+          # Get the SSH key from SSM
           SSH_KEY=$(aws ssm get-parameter \
             --name "/minecraft/${WORKSPACE}/ssh_private_key" \
             --with-decryption \
             --query 'Parameter.Value' \
-            --output text)
-          
-          # Verify key format
-          echo "$SSH_KEY" > /tmp/temp_key
-          if ! ssh-keygen -l -f /tmp/temp_key &>/dev/null; then
-            shred -u /tmp/temp_key
+            --output text || echo "")
+
+          if [ -z "$SSH_KEY" ]; then
+            echo "::error::Failed to retrieve SSH key from SSM"
+            exit 1
+          fi
+
+          # Remove any carriage returns and ensure proper line endings
+          SSH_KEY=$(echo "$SSH_KEY" | tr -d '\r')
+
+          # Verify it starts with proper SSH key format
+          if ! echo "$SSH_KEY" | grep -q "^-----BEGIN [A-Z ]\+ PRIVATE KEY-----"; then
+            echo "::error::Retrieved value is not in valid SSH key format"
+            exit 1
+          fi
+
+          # Verify it ends with proper SSH key format
+          if ! echo "$SSH_KEY" | grep -q "-----END [A-Z ]\+ PRIVATE KEY-----$"; then
+            echo "::error::Retrieved value is not in valid SSH key format"
+            exit 1
+          fi
+
+          # Create a temporary file for ssh-keygen verification
+          TEMP_KEY_FILE=$(mktemp)
+          echo "$SSH_KEY" > "$TEMP_KEY_FILE"
+          chmod 600 "$TEMP_KEY_FILE"
+
+          # Verify the key format using ssh-keygen
+          if ! ssh-keygen -l -f "$TEMP_KEY_FILE" &>/dev/null; then
+            shred -u "$TEMP_KEY_FILE"
             echo "::error::Invalid SSH key format"
             exit 1
           fi
-          shred -u /tmp/temp_key
-          
-          # Store key in output
+          shred -u "$TEMP_KEY_FILE"
+
+          # Store the key in GitHub output with proper escaping
           {
             echo "ssh_key<<EOF"
             echo "$SSH_KEY"
             echo "EOF"
-          } >> $GITHUB_OUTPUT
+          } >> "$GITHUB_OUTPUT"
+
+          echo "Successfully retrieved and validated SSH key"
 
       - uses: actions/checkout@v4.1.1
         with:
