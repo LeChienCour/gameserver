@@ -33,6 +33,19 @@ jobs:
         with:
           terraform_version: 1.12.1
 
+      - name: Validate Terraform Files
+        run: |
+          echo "Validating Terraform files..."
+          terraform validate 2>&1 | tee validate.log
+          
+          if [ ${PIPESTATUS[0]} -ne 0 ]; then
+            echo "::error::Terraform validation failed"
+            cat validate.log
+            exit 1
+          fi
+          
+          echo "Terraform validation successful"
+
       - name: Validate Required Secrets
         env:
           TF_STATE_BUCKET: ${{ secrets.TF_STATE_BUCKET }}
@@ -66,6 +79,48 @@ jobs:
           echo "Using workspace: $WORKSPACE"
           echo "workspace=$WORKSPACE" >> $GITHUB_OUTPUT
 
+      - name: Set up AWS CLI
+        uses: aws-actions/configure-aws-credentials@v4.0.2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+
+      - name: Validate SSH Key
+        id: ssh_key
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.EC2_SSH_PRIVATE_KEY }}
+        run: |
+          if [ -z "$SSH_PRIVATE_KEY" ]; then
+            echo "Error: EC2_SSH_PRIVATE_KEY secret is not set"
+            exit 1
+          fi
+          
+          # Create temporary directory for key handling
+          TEMP_KEY_DIR=$(mktemp -d)
+          trap 'rm -rf "${TEMP_KEY_DIR}"' EXIT
+          
+          # Save key to temporary file with proper permissions
+          KEY_FILE="${TEMP_KEY_DIR}/id_rsa"
+          echo "$SSH_PRIVATE_KEY" > "$KEY_FILE"
+          chmod 600 "$KEY_FILE"
+          
+          # Verify SSH key format
+          if ! ssh-keygen -l -f "$KEY_FILE" >/dev/null 2>&1; then
+            echo "Error: Invalid SSH key format in EC2_SSH_PRIVATE_KEY secret"
+            rm -rf "${TEMP_KEY_DIR}"
+            exit 1
+          fi
+          
+          echo "✅ SSH key validated successfully"
+          
+          # Set the key as output
+          {
+            echo "ssh_key<<EOF"
+            echo "$SSH_PRIVATE_KEY"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Create Backend Config File
         env:
           TF_STATE_BUCKET: ${{ secrets.TF_STATE_BUCKET }}
@@ -77,7 +132,6 @@ jobs:
           region         = "us-east-1"
           dynamodb_table = "$TF_LOCK_TABLE"
           encrypt        = true
-          use_lockfile   = true
           EOF
           
           echo "Generated backend configuration:"
@@ -86,21 +140,36 @@ jobs:
       - name: Terraform Init with Backend Config
         id: init
         run: |
-          # Initialize with backend configuration file
-          terraform init -backend-config=backend.hcl -reconfigure 2>&1 | tee init.log
-
-          # Check if init was successful
-          if [ $? -ne 0 ]; then
-            echo "::error::Terraform init failed"
+          # Enable debug logging
+          export TF_LOG=DEBUG
+          
+          echo "Initializing Terraform..."
+          terraform init -backend-config=backend.hcl -reconfigure -input=false 2>&1 | tee init.log
+          INIT_EXIT_CODE=${PIPESTATUS[0]}
+          
+          if [ $INIT_EXIT_CODE -ne 0 ]; then
+            echo "::error::Terraform init failed with exit code $INIT_EXIT_CODE"
+            echo "Last 50 lines of init.log:"
+            tail -n 50 init.log
             exit 1
           fi
-
-          # Create or select workspace
+          
+          echo "Selecting/creating workspace..."
           if ! terraform workspace select ${{ steps.workspace.outputs.workspace }} 2>/dev/null; then
             echo "Creating new workspace: ${{ steps.workspace.outputs.workspace }}"
             terraform workspace new ${{ steps.workspace.outputs.workspace }}
           fi
-
+          
+          # Verify workspace
+          CURRENT_WORKSPACE=$(terraform workspace show)
+          if [ "$CURRENT_WORKSPACE" != "${{ steps.workspace.outputs.workspace }}" ]; then
+            echo "::error::Failed to switch to workspace ${{ steps.workspace.outputs.workspace }}, current workspace is $CURRENT_WORKSPACE"
+            exit 1
+          fi
+          
+          echo "Current Terraform workspace: $CURRENT_WORKSPACE"
+          echo "Terraform initialization completed successfully"
+          
           echo "INIT_LOG<<EOF" >> $GITHUB_ENV
           cat init.log >> $GITHUB_ENV
           echo "EOF" >> $GITHUB_ENV
@@ -118,11 +187,33 @@ jobs:
         env:
           TF_WORKSPACE: ${{ steps.workspace.outputs.workspace }}
         run: |
-          terraform plan -no-color -detailed-exitcode -out=tfplan 2>&1 | tee plan.log
+          # Enable debug logging
+          export TF_LOG=DEBUG
+          
+          echo "Running Terraform plan..."
+          terraform plan -no-color -detailed-exitcode -input=false -out=tfplan 2>&1 | tee plan.log
+          PLAN_EXIT_CODE=${PIPESTATUS[0]}
+          
+          # Store the plan output
           echo "PLAN_LOG<<EOF" >> $GITHUB_ENV
           cat plan.log >> $GITHUB_ENV
           echo "EOF" >> $GITHUB_ENV
-        continue-on-error: true
+          
+          # Check plan exit code
+          # Exit code 0 = No changes
+          # Exit code 1 = Error
+          # Exit code 2 = Changes present
+          if [ $PLAN_EXIT_CODE -eq 1 ]; then
+            echo "::error::Terraform plan failed"
+            echo "Last 50 lines of plan.log:"
+            tail -n 50 plan.log
+            exit 1
+          fi
+          
+          echo "Terraform plan completed with exit code $PLAN_EXIT_CODE"
+          
+          # Store the exit code for later use
+          echo "plan_exit_code=$PLAN_EXIT_CODE" >> $GITHUB_OUTPUT
 
       - name: Test Infrastructure Deployment
         id: apply
@@ -158,6 +249,39 @@ jobs:
             echo "❌ Error: Failed to get Terraform outputs"
             exit 1
           fi
+
+      - name: Get SSH Key
+        id: ssh_key
+        run: |
+          # Get the workspace name
+          WORKSPACE=$(terraform workspace show)
+          echo "Using workspace: $WORKSPACE"
+          
+          # Try to get the SSH key with retries
+          MAX_RETRIES=5
+          RETRY_COUNT=0
+          while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+            if SSH_KEY=$(aws ssm get-parameter \
+              --name "/minecraft/${WORKSPACE}/ssh_private_key" \
+              --with-decryption \
+              --query 'Parameter.Value' \
+              --output text 2>/dev/null); then
+              echo "✅ Successfully retrieved SSH key from SSM"
+              # Mask the key in logs
+              echo "::add-mask::$SSH_KEY"
+              # Store the key in environment variable for other jobs
+              echo "EC2_SSH_PRIVATE_KEY=$SSH_KEY" >> $GITHUB_ENV
+              break
+            else
+              RETRY_COUNT=$((RETRY_COUNT + 1))
+              if [ $RETRY_COUNT -eq $MAX_RETRIES ]; then
+                echo "❌ Failed to retrieve SSH key after $MAX_RETRIES attempts"
+                exit 1
+              fi
+              echo "Attempt $RETRY_COUNT failed, waiting 10 seconds before retry..."
+              sleep 10
+            fi
+          done
 
       - name: Update PR with Terraform Results
         uses: actions/github-script@v7.0.1
@@ -244,17 +368,33 @@ jobs:
             --with-decryption \
             --query 'Parameter.Value' \
             --output text)
-            
+          
+          # Create temporary directory for key handling
+          TEMP_KEY_DIR=$(mktemp -d)
+          trap 'rm -rf "${TEMP_KEY_DIR}"' EXIT
+          
+          # Save key to temporary file with proper permissions
+          KEY_FILE="${TEMP_KEY_DIR}/id_rsa"
+          echo "$SSH_KEY" > "$KEY_FILE"
+          chmod 600 "$KEY_FILE"
+          
           # Verify SSH key format
-          if ! echo "$SSH_KEY" | ssh-keygen -l -f - >/dev/null 2>&1; then
-            echo "Error: Invalid SSH key format"
+          if ! ssh-keygen -l -f "$KEY_FILE" >/dev/null 2>&1; then
+            echo "Error: Invalid SSH key format. Key content (first line):"
+            head -n 1 "$KEY_FILE" | sed 's/\(.\{1,5\}\).*/\1.../'
+            rm -rf "${TEMP_KEY_DIR}"
             exit 1
           fi
           
+          # If verification passed, set the output
           echo "::add-mask::$SSH_KEY"
-          echo "ssh_key<<EOF" >> $GITHUB_OUTPUT
-          echo "$SSH_KEY" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
+          {
+            echo "ssh_key<<EOF"
+            echo "$SSH_KEY"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+          
+          echo "✅ SSH key validated successfully"
 
       - name: Build and Test Mod
         id: build
@@ -307,9 +447,9 @@ jobs:
         if: success()
         uses: appleboy/ssh-action@v1.0.3
         with:
-          host: ${{ needs.terraform_deploy.outputs.instance_ip }}
+          host: ${{ steps.get_ip.outputs.instance_ip }}
           username: ubuntu
-          key: ${{ steps.get_ssh_key.outputs.ssh_key }}
+          key: ${{ steps.ssh_key.outputs.ssh_key }}
           port: 22
           command_timeout: "20m"
           envs: MOD_JAR_PATH
