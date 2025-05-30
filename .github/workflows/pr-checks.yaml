@@ -332,16 +332,20 @@ jobs:
 
       - name: Update PR with Deployment Status
         if: always()
+        env:
+          BUILD_OUTCOME: ${{ steps.build.outcome }}
+          DEPLOY_OUTCOME: ${{ steps.deploy.outcome }}
         uses: actions/github-script@v7.0.1
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
-            const buildStatus = '${{ steps.build.outcome }}' == 'success' ? '✅' : '❌';
+            const buildStatus = process.env.BUILD_OUTCOME == 'success' ? '✅' : '❌';
+            const deployStatus = process.env.DEPLOY_OUTCOME == 'success' ? '✅' : '❌';
             const output = `### Mod Deployment Status ${buildStatus}
             
             **Steps:**
             - Build and Test: ${buildStatus}
-            - Server Configuration: ${{ steps.deploy.outcome == 'success' ? '✅' : '❌' }}
+            - Server Configuration: ${deployStatus}
             
             ${buildStatus == '✅' ? '✅ Mod successfully deployed to server' : '❌ Deployment failed - check workflow logs for details'}`;
             
