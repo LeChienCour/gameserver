@@ -86,41 +86,6 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: us-east-1
 
-      - name: Validate SSH Key
-        id: ssh_key
-        env:
-          SSH_PRIVATE_KEY: ${{ secrets.EC2_SSH_PRIVATE_KEY }}
-        run: |
-          if [ -z "$SSH_PRIVATE_KEY" ]; then
-            echo "Error: EC2_SSH_PRIVATE_KEY secret is not set"
-            exit 1
-          fi
-          
-          # Create temporary directory for key handling
-          TEMP_KEY_DIR=$(mktemp -d)
-          trap 'rm -rf "${TEMP_KEY_DIR}"' EXIT
-          
-          # Save key to temporary file with proper permissions
-          KEY_FILE="${TEMP_KEY_DIR}/id_rsa"
-          echo "$SSH_PRIVATE_KEY" > "$KEY_FILE"
-          chmod 600 "$KEY_FILE"
-          
-          # Verify SSH key format
-          if ! ssh-keygen -l -f "$KEY_FILE" >/dev/null 2>&1; then
-            echo "Error: Invalid SSH key format in EC2_SSH_PRIVATE_KEY secret"
-            rm -rf "${TEMP_KEY_DIR}"
-            exit 1
-          fi
-          
-          echo "✅ SSH key validated successfully"
-          
-          # Set the key as output
-          {
-            echo "ssh_key<<EOF"
-            echo "$SSH_PRIVATE_KEY"
-            echo "EOF"
-          } >> "$GITHUB_OUTPUT"
-
       - name: Create Backend Config File
         env:
           TF_STATE_BUCKET: ${{ secrets.TF_STATE_BUCKET }}
@@ -250,7 +215,7 @@ jobs:
             exit 1
           fi
 
-      - name: Get SSH Key
+      - name: Get SSH Key from SSM
         id: ssh_key
         run: |
           # Get the workspace name
