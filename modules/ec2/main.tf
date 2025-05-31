@@ -1,6 +1,6 @@
 # IAM Role for EC2
 resource "aws_iam_role" "game_server_role" {
-  name = "game-server-role"
+  name = "game-server-role-${var.stage}"
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
@@ -14,11 +14,16 @@ resource "aws_iam_role" "game_server_role" {
       }
     ]
   })
+
+  tags = {
+    Name  = "game-server-role-${var.stage}"
+    Stage = var.stage
+  }
 }
 
 # IAM Policy for EC2
 resource "aws_iam_role_policy" "game_server_policy" {
-  name = "game-server-policy"
+  name = "game-server-policy-${var.stage}"
   role = aws_iam_role.game_server_role.id
 
   policy = jsonencode({
@@ -69,11 +74,16 @@ resource "aws_iam_role_policy_attachment" "ssm_policy" {
 
 # IAM Instance Profile
 resource "aws_iam_instance_profile" "game_server_profile" {
-  name = "game-server-profile"
+  name = "game-server-profile-${var.stage}"
   role = aws_iam_role.game_server_role.name
+
+  tags = {
+    Name  = "game-server-profile-${var.stage}"
+    Stage = var.stage
+  }
 }
 
-# Cargar script de user data
+# Load user data script
 data "template_file" "user_data" {
   template = file("${path.module}/userdata.sh")
 
@@ -97,8 +107,13 @@ resource "tls_private_key" "ssh_key" {
 
 # Create AWS key pair
 resource "aws_key_pair" "generated_key" {
-  key_name   = "minecraft-server-key-${terraform.workspace}"
+  key_name   = "minecraft-server-key-${var.stage}"
   public_key = tls_private_key.ssh_key.public_key_openssh
+
+  tags = {
+    Name  = "minecraft-server-key-${var.stage}"
+    Stage = var.stage
+  }
 }
 
 # EC2 Instance
@@ -121,8 +136,9 @@ resource "aws_instance" "game_server" {
   }
 
   tags = {
-    Name        = "minecraft-neoforge-server"
+    Name        = "minecraft-neoforge-server-${var.stage}"
     Environment = var.environment
+    Stage       = var.stage
     Managed_by  = "terraform"
   }
 }
@@ -138,18 +154,21 @@ resource "aws_eip" "game_server_eip" {
   domain   = "vpc"
 
   tags = {
-    Name        = "minecraft-server-eip"
+    Name        = "minecraft-server-eip-${var.stage}"
     Environment = var.environment
+    Stage       = var.stage
   }
 }
 
 # CloudWatch Logs
 resource "aws_cloudwatch_log_group" "minecraft_logs" {
-  name              = "/minecraft/server/${var.environment}"
+  name              = "/minecraft/server/${var.stage}"
   retention_in_days = var.log_retention_days
 
   tags = {
+    Name        = "minecraft-logs-${var.stage}"
     Environment = var.environment
+    Stage       = var.stage
     Managed_by  = "terraform"
   }
 }

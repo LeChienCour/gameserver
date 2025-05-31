@@ -2,13 +2,19 @@
 
 # Common Configuration
 variable "environment" {
-  description = "Environment name"
+  description = "Environment name (e.g., dev, staging, prod)"
+  type        = string
+  default     = "dev"
+}
+
+variable "stage" {
+  description = "Deployment stage name (e.g., dev, staging, prod) - used for resource naming"
   type        = string
   default     = "dev"
 }
 
 variable "prefix" {
-  description = "Prefix for resource names"
+  description = "Prefix for resource names, will be combined with stage"
   type        = string
   default     = "gameserver"
 }

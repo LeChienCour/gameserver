@@ -12,11 +12,22 @@ on:
       - 'terraform/**'            # Infrastructure code
       - 'userdata.sh'            # Instance initialization
   workflow_dispatch:  # Allow manual triggers
+    inputs:
+      stage:
+        description: 'Deployment stage (dev/staging/prod)'
+        required: true
+        default: 'dev'
+        type: choice
+        options:
+          - dev
+          - staging
+          - prod
 
 # Set minimal required permissions for security
 permissions:
   contents: read    # For repository checkout
   id-token: write  # For AWS authentication
+  deployments: write # For deployment status
 
 jobs:
   # First job: Deploy infrastructure using Terraform
@@ -68,10 +79,22 @@ jobs:
           echo "All required secrets are set"
 
       # Configure Terraform backend for state management
+      - name: Determine Stage
+        id: stage
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            STAGE="${{ github.event.inputs.stage }}"
+          else
+            STAGE="dev"  # Default to dev for push events
+          fi
+          echo "stage=$STAGE" >> $GITHUB_OUTPUT
+          echo "Deploying to stage: $STAGE"
+
       - name: Create Backend Config File
         env:
           TF_STATE_BUCKET: ${{ secrets.TF_STATE_BUCKET }}
           TF_LOCK_TABLE: ${{ secrets.TF_LOCK_TABLE }}
+          STAGE: ${{ steps.stage.outputs.stage }}
         run: |
           cat > backend.hcl << EOF
           bucket         = "$TF_STATE_BUCKET"
@@ -107,12 +130,14 @@ jobs:
       # Plan infrastructure changes
       - name: Terraform Plan
         id: plan
+        env:
+          TF_VAR_stage: ${{ steps.stage.outputs.stage }}
         run: |
           # Set logging to show only errors
           export TF_LOG=ERROR
           
           echo "Running Terraform plan..."
-          terraform plan -no-color -detailed-exitcode -input=false -out=tfplan 2>&1 | tee plan.log
+          terraform plan -var="stage=${{ steps.stage.outputs.stage }}" -no-color -detailed-exitcode -input=false -out=tfplan 2>&1 | tee plan.log
           PLAN_EXIT_CODE=${PIPESTATUS[0]}
           
           if [ $PLAN_EXIT_CODE -eq 1 ]; then
@@ -133,6 +158,8 @@ jobs:
       # Apply infrastructure changes
       - name: Apply Infrastructure Changes
         id: apply
+        env:
+          TF_VAR_stage: ${{ steps.stage.outputs.stage }}
         run: |
           # Set logging to show only errors
           export TF_LOG=ERROR
@@ -182,6 +209,14 @@ jobs:
     needs: [terraform_deploy]  # Wait for infrastructure
     runs-on: ubuntu-latest
     steps:
+      # Set up AWS credentials first
+      - name: Set up AWS CLI
+        uses: aws-actions/configure-aws-credentials@v4.0.2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+
       # Get mod source code
       - uses: actions/checkout@v4.1.1
         with:
@@ -318,3 +353,4 @@ jobs:
             echo "Waiting for deployment to complete... Current status: $STATUS"
             sleep 10
           done
+

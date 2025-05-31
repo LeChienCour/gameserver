@@ -2,7 +2,7 @@
 terraform {
   backend "s3" {
     bucket         = "devops-t2-gameserver-tfstate"
-    key            = "terraform/state"
+    key            = "terraform.tfstate"
     region         = "us-east-1"
     encrypt        = true
     dynamodb_table = "terraform-state-locks"
@@ -42,9 +42,10 @@ data "aws_ami" "amazon_linux_2" {
 module "api_gateway" {
   source = "./modules/api_gateway"
 
-  prefix              = var.prefix
+  prefix              = "${var.prefix}-${var.stage}"
   stage_name          = var.websocket_stage_name
   cloudwatch_role_arn = module.iam.cloudwatch_role_arn
+  environment         = var.environment
 
   # Lambda ARNs
   lambda_connect_arn    = module.lambda.lambda_functions["connect"]
@@ -68,11 +69,12 @@ module "cognito" {
   user_pool_name  = var.user_pool_name
   app_client_name = var.app_client_name
   admin_role_name = var.admin_role_name
+  stage           = var.stage
 }
 
 # DynamoDB Resources
 resource "aws_dynamodb_table" "websocket_connections" {
-  name         = "${var.project_name}-connections"
+  name         = "${var.project_name}-${var.stage}-connections"
   billing_mode = "PAY_PER_REQUEST"
   hash_key     = "connectionId"
 
@@ -82,8 +84,9 @@ resource "aws_dynamodb_table" "websocket_connections" {
   }
 
   tags = {
-    Name        = "${var.project_name}-connections"
+    Name        = "${var.project_name}-${var.stage}-connections"
     Environment = var.environment
+    Stage       = var.stage
   }
 }
 
@@ -98,14 +101,16 @@ module "ec2_game_server" {
   websocket_port      = var.websocket_port
   user_pool_id        = module.cognito.user_pool_id
   user_pool_client_id = module.cognito.user_pool_client_id
+  stage               = var.stage
+  environment         = var.environment
 }
 
 # EventBridge Module
 module "eventbridge" {
   source = "./modules/eventbridge"
 
-  prefix             = var.prefix
-  event_bus_name     = var.event_bus_name
+  prefix             = "${var.prefix}-${var.stage}"
+  event_bus_name     = "${var.event_bus_name}-${var.stage}"
   event_source       = var.event_source
   event_detail_type  = var.event_detail_type
   log_retention_days = var.log_retention_days
@@ -119,11 +124,13 @@ module "eventbridge" {
 module "iam" {
   source = "./modules/iam"
 
-  prefix            = var.prefix
+  prefix            = "${var.prefix}-${var.stage}"
   audio_bucket_name = aws_s3_bucket.audio_storage.id
   kms_key_arn       = module.kms.key_arn
   event_bus_arn     = module.eventbridge.event_bus_arn
   connections_table = var.connections_table
+  environment       = var.environment
+  stage             = var.stage
 
   depends_on = [
     aws_s3_bucket.audio_storage
@@ -134,8 +141,9 @@ module "iam" {
 module "kms" {
   source = "./modules/kms"
 
-  prefix       = var.prefix
+  prefix       = "${var.prefix}-${var.stage}"
   environment  = var.environment
+  stage        = var.stage
   project_name = var.project_name
 }
 
@@ -143,10 +151,10 @@ module "kms" {
 module "lambda" {
   source = "./modules/lambda"
 
-  prefix                    = var.prefix
+  prefix                    = "${var.prefix}-${var.stage}"
   lambda_functions          = var.lambda_functions
   audio_bucket_name         = aws_s3_bucket.audio_storage.id
-  connections_table         = var.connections_table
+  connections_table         = "${var.connections_table}-${var.stage}"
   audio_processing_rule_arn = module.eventbridge.audio_processing_rule_arn
   audio_validation_rule_arn = module.eventbridge.audio_validation_rule_arn
   lambda_role_arn           = module.iam.lambda_role_arn
@@ -155,6 +163,7 @@ module "lambda" {
   api_gateway_id            = module.api_gateway.api_id
   api_gateway_execution_arn = module.api_gateway.execution_arn
   environment               = var.environment
+  stage                     = var.stage
 
   depends_on = [
     aws_s3_bucket.audio_storage,
@@ -205,15 +214,18 @@ module "security_groups" {
   allowed_game_ips                = ["0.0.0.0/0"]
   game_protocol                   = var.game_protocol
   vpc_endpoints_security_group_id = module.vpc.vpc_endpoints_security_group_id
+  stage                           = var.stage
+  environment                     = var.environment
 }
 
 # Storage Resources
 resource "aws_s3_bucket" "audio_storage" {
-  bucket = var.audio_bucket_name
+  bucket = "${var.audio_bucket_name}-${var.stage}"
 
   tags = {
-    Name        = "${var.project_name}-audio-storage"
+    Name        = "${var.project_name}-${var.stage}-audio-storage"
     Environment = var.environment
+    Stage       = var.stage
   }
 }
 
@@ -254,12 +266,14 @@ module "vpc" {
   public_subnets_cidr = var.public_subnets_cidr
   availability_zones  = var.availability_zones
   vpc_name            = var.vpc_name
+  stage               = var.stage
 }
 
 # SSM Module
 module "ssm" {
   source = "./modules/ssm"
 
+  stage               = var.stage
   user_pool_id        = module.cognito.user_pool_id
   user_pool_client_id = module.cognito.user_pool_client_id
   websocket_api_id    = module.api_gateway.api_id

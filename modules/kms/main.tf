@@ -1,12 +1,13 @@
 # KMS Key for audio encryption
 resource "aws_kms_key" "audio_key" {
-  description             = "KMS key for audio encryption"
+  description             = "KMS key for audio encryption - ${var.stage} environment"
   deletion_window_in_days = 7
   enable_key_rotation     = true
 
   tags = {
     Environment = var.environment
     Project     = var.project_name
+    Stage       = var.stage
   }
 }
 

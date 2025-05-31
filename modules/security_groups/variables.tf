@@ -43,3 +43,14 @@ variable "vpc_endpoints_security_group_id" {
   description = "ID of the VPC endpoints security group"
   type        = string
 }
+
+variable "stage" {
+  description = "Deployment stage (e.g., dev, staging, prod)"
+  type        = string
+}
+
+variable "environment" {
+  description = "Environment name (e.g., dev, prod)"
+  type        = string
+  default     = "dev"
+}

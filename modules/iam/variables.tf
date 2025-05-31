@@ -21,4 +21,15 @@ variable "event_bus_arn" {
 variable "connections_table" {
   description = "Name of the DynamoDB connections table"
   type        = string
+}
+
+variable "environment" {
+  description = "Environment name (e.g., dev, prod)"
+  type        = string
+  default     = "dev"
+}
+
+variable "stage" {
+  description = "Deployment stage (e.g., dev, staging, prod)"
+  type        = string
 } 
