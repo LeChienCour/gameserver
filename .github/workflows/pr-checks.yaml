@@ -66,19 +66,15 @@ jobs:
         run: |
           PR_NUMBER=$(echo $GITHUB_REF | cut -d'/' -f3)
           WORKSPACE="pr-${PR_NUMBER}"
-          echo "Using workspace: $WORKSPACE"
           echo "workspace=$WORKSPACE" >> $GITHUB_OUTPUT
 
       - name: Create Backend Config File
-        env:
-          TF_STATE_BUCKET: ${{ secrets.TF_STATE_BUCKET }}
-          TF_LOCK_TABLE: ${{ secrets.TF_LOCK_TABLE }}
         run: |
           cat > backend.hcl << EOF
-          bucket         = "$TF_STATE_BUCKET"
-          key            = "pr-environments/${{ steps.workspace.outputs.workspace }}/terraform.tfstate"
+          bucket         = "${{ secrets.TF_STATE_BUCKET }}"
+          key            = "terraform.tfstate"
           region         = "us-east-1"
-          dynamodb_table = "$TF_LOCK_TABLE"
+          dynamodb_table = "${{ secrets.TF_LOCK_TABLE }}"
           encrypt        = true
           EOF
           
