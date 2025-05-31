@@ -29,11 +29,6 @@ resource "aws_cognito_user_pool" "main" {
 resource "aws_cognito_user_pool_client" "client" {
   name         = "${var.app_client_name}-${var.stage}"
   user_pool_id = aws_cognito_user_pool.pool.id
-
-  tags = {
-    Name  = "${var.app_client_name}-${var.stage}"
-    Stage = var.stage
-  }
 }
 
 resource "aws_iam_role" "admin_role" {

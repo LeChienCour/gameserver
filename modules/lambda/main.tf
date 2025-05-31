@@ -20,6 +20,7 @@ resource "aws_lambda_function" "process_audio" {
     Name        = "${var.prefix}-process-audio"
     Environment = var.environment
     Service     = "AudioProcessing"
+    Stage       = var.stage
   }
 }
 
@@ -44,6 +45,7 @@ resource "aws_lambda_function" "validate_audio" {
     Name        = "${var.prefix}-validate-audio"
     Environment = var.environment
     Service     = "AudioValidation"
+    Stage       = var.stage
   }
 }
 
@@ -67,6 +69,7 @@ resource "aws_lambda_function" "connect" {
     Name        = "${var.prefix}-connect"
     Environment = var.environment
     Service     = "WebSocket"
+    Stage       = var.stage
   }
 }
 
@@ -89,6 +92,7 @@ resource "aws_lambda_function" "disconnect" {
     Name        = "${var.prefix}-disconnect"
     Environment = var.environment
     Service     = "WebSocket"
+    Stage       = var.stage
   }
 }
 
@@ -113,6 +117,7 @@ resource "aws_lambda_function" "message" {
     Name        = "${var.prefix}-message"
     Environment = var.environment
     Service     = "WebSocket"
+    Stage       = var.stage
   }
 }
 

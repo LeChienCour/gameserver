@@ -2,7 +2,7 @@
 terraform {
   backend "s3" {
     bucket         = "devops-t2-gameserver-tfstate"
-    key            = "${var.stage}/terraform.tfstate"
+    key            = "terraform.tfstate"
     region         = "us-east-1"
     encrypt        = true
     dynamodb_table = "terraform-state-locks"
@@ -215,6 +215,7 @@ module "security_groups" {
   game_protocol                   = var.game_protocol
   vpc_endpoints_security_group_id = module.vpc.vpc_endpoints_security_group_id
   stage                           = var.stage
+  environment                     = var.environment
 }
 
 # Storage Resources
