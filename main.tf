@@ -2,7 +2,7 @@
 terraform {
   backend "s3" {
     bucket         = "devops-t2-gameserver-tfstate"
-    key            = "terraform/state"
+    key            = "${var.stage}/terraform.tfstate"
     region         = "us-east-1"
     encrypt        = true
     dynamodb_table = "terraform-state-locks"
@@ -42,9 +42,10 @@ data "aws_ami" "amazon_linux_2" {
 module "api_gateway" {
   source = "./modules/api_gateway"
 
-  prefix              = var.prefix
+  prefix              = "${var.prefix}-${var.stage}"
   stage_name          = var.websocket_stage_name
   cloudwatch_role_arn = module.iam.cloudwatch_role_arn
+  environment         = var.environment
 
   # Lambda ARNs
   lambda_connect_arn    = module.lambda.lambda_functions["connect"]
@@ -72,7 +73,7 @@ module "cognito" {
 
 # DynamoDB Resources
 resource "aws_dynamodb_table" "websocket_connections" {
-  name         = "${var.project_name}-connections"
+  name         = "${var.project_name}-${var.stage}-connections"
   billing_mode = "PAY_PER_REQUEST"
   hash_key     = "connectionId"
 
@@ -82,8 +83,9 @@ resource "aws_dynamodb_table" "websocket_connections" {
   }
 
   tags = {
-    Name        = "${var.project_name}-connections"
+    Name        = "${var.project_name}-${var.stage}-connections"
     Environment = var.environment
+    Stage       = var.stage
   }
 }
 
@@ -104,8 +106,8 @@ module "ec2_game_server" {
 module "eventbridge" {
   source = "./modules/eventbridge"
 
-  prefix             = var.prefix
-  event_bus_name     = var.event_bus_name
+  prefix             = "${var.prefix}-${var.stage}"
+  event_bus_name     = "${var.event_bus_name}-${var.stage}"
   event_source       = var.event_source
   event_detail_type  = var.event_detail_type
   log_retention_days = var.log_retention_days
@@ -119,11 +121,13 @@ module "eventbridge" {
 module "iam" {
   source = "./modules/iam"
 
-  prefix            = var.prefix
+  prefix            = "${var.prefix}-${var.stage}"
   audio_bucket_name = aws_s3_bucket.audio_storage.id
   kms_key_arn       = module.kms.key_arn
   event_bus_arn     = module.eventbridge.event_bus_arn
   connections_table = var.connections_table
+  environment       = var.environment
+  stage            = var.stage
 
   depends_on = [
     aws_s3_bucket.audio_storage
@@ -134,8 +138,9 @@ module "iam" {
 module "kms" {
   source = "./modules/kms"
 
-  prefix       = var.prefix
+  prefix       = "${var.prefix}-${var.stage}"
   environment  = var.environment
+  stage       = var.stage
   project_name = var.project_name
 }
 
@@ -143,10 +148,10 @@ module "kms" {
 module "lambda" {
   source = "./modules/lambda"
 
-  prefix                    = var.prefix
+  prefix                    = "${var.prefix}-${var.stage}"
   lambda_functions          = var.lambda_functions
   audio_bucket_name         = aws_s3_bucket.audio_storage.id
-  connections_table         = var.connections_table
+  connections_table         = "${var.connections_table}-${var.stage}"
   audio_processing_rule_arn = module.eventbridge.audio_processing_rule_arn
   audio_validation_rule_arn = module.eventbridge.audio_validation_rule_arn
   lambda_role_arn           = module.iam.lambda_role_arn
@@ -155,6 +160,7 @@ module "lambda" {
   api_gateway_id            = module.api_gateway.api_id
   api_gateway_execution_arn = module.api_gateway.execution_arn
   environment               = var.environment
+  stage                    = var.stage
 
   depends_on = [
     aws_s3_bucket.audio_storage,
@@ -209,11 +215,12 @@ module "security_groups" {
 
 # Storage Resources
 resource "aws_s3_bucket" "audio_storage" {
-  bucket = var.audio_bucket_name
+  bucket = "${var.audio_bucket_name}-${var.stage}"
 
   tags = {
-    Name        = "${var.project_name}-audio-storage"
+    Name        = "${var.project_name}-${var.stage}-audio-storage"
     Environment = var.environment
+    Stage       = var.stage
   }
 }
 

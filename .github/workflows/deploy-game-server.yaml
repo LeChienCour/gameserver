@@ -12,6 +12,16 @@ on:
       - 'terraform/**'            # Infrastructure code
       - 'userdata.sh'            # Instance initialization
   workflow_dispatch:  # Allow manual triggers
+    inputs:
+      stage:
+        description: 'Deployment stage (dev/staging/prod)'
+        required: true
+        default: 'dev'
+        type: choice
+        options:
+          - dev
+          - staging
+          - prod
 
 # Set minimal required permissions for security
 permissions:
@@ -69,14 +79,26 @@ jobs:
           echo "All required secrets are set"
 
       # Configure Terraform backend for state management
+      - name: Determine Stage
+        id: stage
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            STAGE="${{ github.event.inputs.stage }}"
+          else
+            STAGE="dev"  # Default to dev for push events
+          fi
+          echo "stage=$STAGE" >> $GITHUB_OUTPUT
+          echo "Deploying to stage: $STAGE"
+
       - name: Create Backend Config File
         env:
           TF_STATE_BUCKET: ${{ secrets.TF_STATE_BUCKET }}
           TF_LOCK_TABLE: ${{ secrets.TF_LOCK_TABLE }}
+          STAGE: ${{ steps.stage.outputs.stage }}
         run: |
           cat > backend.hcl << EOF
           bucket         = "$TF_STATE_BUCKET"
-          key            = "terraform.tfstate"
+          key            = "$STAGE/terraform.tfstate"
           region         = "us-east-1"
           dynamodb_table = "$TF_LOCK_TABLE"
           encrypt        = true
@@ -108,12 +130,14 @@ jobs:
       # Plan infrastructure changes
       - name: Terraform Plan
         id: plan
+        env:
+          TF_VAR_stage: ${{ steps.stage.outputs.stage }}
         run: |
           # Set logging to show only errors
           export TF_LOG=ERROR
           
           echo "Running Terraform plan..."
-          terraform plan -no-color -detailed-exitcode -input=false -out=tfplan 2>&1 | tee plan.log
+          terraform plan -var="stage=${{ steps.stage.outputs.stage }}" -no-color -detailed-exitcode -input=false -out=tfplan 2>&1 | tee plan.log
           PLAN_EXIT_CODE=${PIPESTATUS[0]}
           
           if [ $PLAN_EXIT_CODE -eq 1 ]; then
@@ -134,6 +158,8 @@ jobs:
       # Apply infrastructure changes
       - name: Apply Infrastructure Changes
         id: apply
+        env:
+          TF_VAR_stage: ${{ steps.stage.outputs.stage }}
         run: |
           # Set logging to show only errors
           export TF_LOG=ERROR
@@ -339,8 +365,8 @@ jobs:
             --method POST \
             /repos/${{ github.repository }}/deployments \
             -f ref="${{ github.sha }}" \
-            -f environment="production" \
-            -f description="Deploying to production" \
+            -f environment="dev" \
+            -f description="Deploying to dev" \
             --jq '.id')
 
           # Create deployment status
@@ -359,5 +385,5 @@ jobs:
             /repos/${{ github.repository }}/deployments/$DEPLOY_ID/statuses \
             -f state="$STATE" \
             -f description="$MESSAGE" \
-            -f environment="production" \
+            -f environment="dev" \
             -f environment_url="https://${{ needs.terraform_deploy.outputs.instance_ip }}"

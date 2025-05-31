@@ -1,3 +1,8 @@
+variable "stage" {
+  description = "Deployment stage name (e.g., dev, staging, prod)"
+  type        = string
+}
+
 variable "user_pool_id" {
   description = "Cognito User Pool ID"
   type        = string
