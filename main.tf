@@ -130,7 +130,7 @@ module "iam" {
   event_bus_arn     = module.eventbridge.event_bus_arn
   connections_table = var.connections_table
   environment       = var.environment
-  stage            = var.stage
+  stage             = var.stage
 
   depends_on = [
     aws_s3_bucket.audio_storage
@@ -143,7 +143,7 @@ module "kms" {
 
   prefix       = "${var.prefix}-${var.stage}"
   environment  = var.environment
-  stage       = var.stage
+  stage        = var.stage
   project_name = var.project_name
 }
 
@@ -163,7 +163,7 @@ module "lambda" {
   api_gateway_id            = module.api_gateway.api_id
   api_gateway_execution_arn = module.api_gateway.execution_arn
   environment               = var.environment
-  stage                    = var.stage
+  stage                     = var.stage
 
   depends_on = [
     aws_s3_bucket.audio_storage,
