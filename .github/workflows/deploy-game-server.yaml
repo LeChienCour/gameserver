@@ -75,7 +75,7 @@ jobs:
         run: |
           cat > backend.hcl << EOF
           bucket         = "$TF_STATE_BUCKET"
-          key            = "prod/terraform.tfstate"  # Production state file
+          key            = "terraform.tfstate"
           region         = "us-east-1"
           dynamodb_table = "$TF_LOCK_TABLE"
           encrypt        = true
@@ -318,28 +318,3 @@ jobs:
             echo "Waiting for deployment to complete... Current status: $STATUS"
             sleep 10
           done
-
-      # Update GitHub deployment status
-      - name: Create Deployment Status
-        if: always()
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          # Create deployment status
-          STATUS="${{ steps.deploy.outcome }}"
-          if [ "$STATUS" = "success" ]; then
-            MESSAGE="✅ Minecraft server deployed successfully"
-            STATE="success"
-          else
-            MESSAGE="❌ Deployment failed"
-            STATE="failure"
-          fi
-          
-          # Create a deployment status
-          gh api \
-            --method POST \
-            /repos/${{ github.repository }}/deployments/statuses/${{ github.run_id }} \
-            -f state="$STATE" \
-            -f description="$MESSAGE" \
-            -f environment="production" \
-            -f environment_url="https://${{ needs.terraform_deploy.outputs.instance_ip }}"
