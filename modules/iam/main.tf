@@ -14,6 +14,12 @@ resource "aws_iam_role" "lambda_role" {
       }
     ]
   })
+
+  tags = {
+    Name        = "${var.prefix}-lambda-role"
+    Environment = var.environment
+    Stage       = var.stage
+  }
 }
 
 # IAM Role for API Gateway CloudWatch Logging
@@ -32,6 +38,12 @@ resource "aws_iam_role" "api_gateway_cloudwatch" {
       }
     ]
   })
+
+  tags = {
+    Name        = "${var.prefix}-api-gateway-cloudwatch-role"
+    Environment = var.environment
+    Stage       = var.stage
+  }
 }
 
 # IAM Policy for Lambda

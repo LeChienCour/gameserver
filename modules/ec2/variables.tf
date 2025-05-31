@@ -47,6 +47,11 @@ variable "environment" {
   default     = "dev"
 }
 
+variable "stage" {
+  description = "Deployment stage (e.g., dev, staging, prod)"
+  type        = string
+}
+
 variable "minecraft_version" {
   description = "Version of Minecraft to install"
   type        = string

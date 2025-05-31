@@ -5,7 +5,8 @@ resource "aws_vpc" "main" {
   enable_dns_support   = true
 
   tags = {
-    Name = var.vpc_name
+    Name  = "${var.vpc_name}-${var.stage}"
+    Stage = var.stage
   }
 }
 
@@ -17,7 +18,8 @@ resource "aws_subnet" "public" {
   map_public_ip_on_launch = true # Enable auto-assign public IP
 
   tags = {
-    Name = "${var.vpc_name}-public-${count.index + 1}"
+    Name  = "${var.vpc_name}-${var.stage}-public-${count.index + 1}"
+    Stage = var.stage
   }
 }
 
@@ -25,7 +27,8 @@ resource "aws_internet_gateway" "main" {
   vpc_id = aws_vpc.main.id
 
   tags = {
-    Name = "${var.vpc_name}-igw"
+    Name  = "${var.vpc_name}-${var.stage}-igw"
+    Stage = var.stage
   }
 }
 
@@ -33,7 +36,8 @@ resource "aws_route_table" "public" {
   vpc_id = aws_vpc.main.id
 
   tags = {
-    Name = "${var.vpc_name}-public-route-table"
+    Name  = "${var.vpc_name}-${var.stage}-public-route-table"
+    Stage = var.stage
   }
 }
 
@@ -51,8 +55,8 @@ resource "aws_route_table_association" "public" {
 
 # VPC Endpoints Security Group
 resource "aws_security_group" "vpc_endpoints" {
-  name        = "vpc-endpoints-sg"
-  description = "Security group for VPC endpoints"
+  name        = "vpc-endpoints-sg-${var.stage}"
+  description = "Security group for VPC endpoints - ${var.stage}"
   vpc_id      = aws_vpc.main.id
 
   ingress {
@@ -70,7 +74,8 @@ resource "aws_security_group" "vpc_endpoints" {
   }
 
   tags = {
-    Name = "vpc-endpoints-sg"
+    Name  = "vpc-endpoints-sg-${var.stage}"
+    Stage = var.stage
   }
 }
 
@@ -85,7 +90,8 @@ resource "aws_vpc_endpoint" "ssm" {
   private_dns_enabled = true
 
   tags = {
-    Name = "ssm-endpoint"
+    Name  = "ssm-endpoint-${var.stage}"
+    Stage = var.stage
   }
 }
 
@@ -99,7 +105,8 @@ resource "aws_vpc_endpoint" "ssmmessages" {
   private_dns_enabled = true
 
   tags = {
-    Name = "ssmmessages-endpoint"
+    Name  = "ssmmessages-endpoint-${var.stage}"
+    Stage = var.stage
   }
 }
 
@@ -113,7 +120,8 @@ resource "aws_vpc_endpoint" "ec2messages" {
   private_dns_enabled = true
 
   tags = {
-    Name = "ec2messages-endpoint"
+    Name  = "ec2messages-endpoint-${var.stage}"
+    Stage = var.stage
   }
 }
 
@@ -128,7 +136,8 @@ resource "aws_vpc_endpoint" "execute_api" {
   private_dns_enabled = true
 
   tags = {
-    Name = "apigateway-endpoint"
+    Name  = "apigateway-endpoint-${var.stage}"
+    Stage = var.stage
   }
 }
 

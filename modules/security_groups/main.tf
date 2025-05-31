@@ -1,6 +1,6 @@
 resource "aws_security_group" "game_server" {
-  name        = var.security_group_name
-  description = "Security group for game server"
+  name        = "${var.security_group_name}-${var.stage}"
+  description = "Security group for game server - ${var.stage}"
   vpc_id      = var.vpc_id
 
   # Minecraft server port
@@ -64,7 +64,9 @@ resource "aws_security_group" "game_server" {
   }
 
   tags = {
-    Name = var.security_group_name
+    Name        = "${var.security_group_name}-${var.stage}"
+    Stage       = var.stage
+    Environment = var.environment
   }
 }
 

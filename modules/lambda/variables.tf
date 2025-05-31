@@ -94,4 +94,9 @@ variable "audio_processing_rule_arn" {
 variable "audio_validation_rule_arn" {
   description = "ARN of the audio validation EventBridge rule"
   type        = string
+}
+
+variable "stage" {
+  description = "Deployment stage (e.g., dev, staging, prod)"
+  type        = string
 } 

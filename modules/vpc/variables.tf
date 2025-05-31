@@ -17,3 +17,8 @@ variable "vpc_name" {
   description = "Name for the VPC"
   type        = string
 }
+
+variable "stage" {
+  description = "Deployment stage (e.g., dev, staging, prod)"
+  type        = string
+}
