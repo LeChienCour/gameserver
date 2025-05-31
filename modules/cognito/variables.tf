@@ -12,3 +12,8 @@ variable "admin_role_name" {
   description = "Name of the admin role"
   type        = string
 }
+
+variable "stage" {
+  description = "Deployment stage (e.g., dev, staging, prod)"
+  type        = string
+}

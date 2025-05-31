@@ -69,6 +69,7 @@ module "cognito" {
   user_pool_name  = var.user_pool_name
   app_client_name = var.app_client_name
   admin_role_name = var.admin_role_name
+  stage           = var.stage
 }
 
 # DynamoDB Resources
@@ -100,6 +101,8 @@ module "ec2_game_server" {
   websocket_port      = var.websocket_port
   user_pool_id        = module.cognito.user_pool_id
   user_pool_client_id = module.cognito.user_pool_client_id
+  stage               = var.stage
+  environment         = var.environment
 }
 
 # EventBridge Module
@@ -211,6 +214,7 @@ module "security_groups" {
   allowed_game_ips                = ["0.0.0.0/0"]
   game_protocol                   = var.game_protocol
   vpc_endpoints_security_group_id = module.vpc.vpc_endpoints_security_group_id
+  stage                           = var.stage
 }
 
 # Storage Resources
@@ -261,12 +265,14 @@ module "vpc" {
   public_subnets_cidr = var.public_subnets_cidr
   availability_zones  = var.availability_zones
   vpc_name            = var.vpc_name
+  stage               = var.stage
 }
 
 # SSM Module
 module "ssm" {
   source = "./modules/ssm"
 
+  stage               = var.stage
   user_pool_id        = module.cognito.user_pool_id
   user_pool_client_id = module.cognito.user_pool_client_id
   websocket_api_id    = module.api_gateway.api_id
