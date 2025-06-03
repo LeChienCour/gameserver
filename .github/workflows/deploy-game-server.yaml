@@ -217,6 +217,33 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: us-east-1
 
+      # Verify AWS credentials and SSM access
+      - name: Verify AWS Access
+        run: |
+          echo "Verifying AWS credentials..."
+          aws sts get-caller-identity
+          
+          echo "Testing SSM parameter access..."
+          # Test access to required SSM parameters
+          PARAMS=(
+            "/gameserver/dev/websocket/stage_url"
+            "/gameserver/dev/websocket/api_key"
+            "/gameserver/dev/cognito/user_pool_id"
+            "/gameserver/dev/cognito/user_pool_client_id"
+          )
+          
+          for param in "${PARAMS[@]}"; do
+            echo "Testing access to $param"
+            if ! aws ssm get-parameter --name "$param" --with-decryption >/dev/null 2>&1; then
+              echo "::error::Failed to access SSM parameter: $param"
+              exit 1
+            fi
+          done
+          echo "✅ Successfully verified AWS credentials and SSM access"
+
+      # Get repository code (includes deployment scripts)
+      - uses: actions/checkout@v4.1.1
+
       # Get mod source code
       - uses: actions/checkout@v4.1.1
         with:
@@ -246,110 +273,15 @@ jobs:
           fi
           echo "mod_jar=$MOD_JAR" >> $GITHUB_OUTPUT
 
-      # Install AWS Session Manager for secure instance access
-      - name: Configure AWS Session Manager
-        run: |
-          # Install Session Manager plugin
-          curl "https://s3.amazonaws.com/session-manager-downloads/plugin/latest/ubuntu_64bit/session-manager-plugin.deb" -o "session-manager-plugin.deb"
-          sudo dpkg -i session-manager-plugin.deb
-          
-          # Verify installation
-          session-manager-plugin --version
-
-      # Get EC2 instance ID from IP
-      - name: Get Instance ID
-        id: instance
-        run: |
-          # Get instance ID using the public IP
-          INSTANCE_IP="${{ needs.terraform_deploy.outputs.instance_ip }}"
-          INSTANCE_ID=$(aws ec2 describe-instances \
-            --filters "Name=ip-address,Values=$INSTANCE_IP" \
-            --query "Reservations[].Instances[?State.Name=='running'].InstanceId" \
-            --output text)
-          
-          if [ -z "$INSTANCE_ID" ]; then
-            echo "::error::Could not find instance ID for IP $INSTANCE_IP"
-            exit 1
-          fi
-          
-          echo "instance_id=$INSTANCE_ID" >> $GITHUB_OUTPUT
-          echo "Found instance ID: $INSTANCE_ID"
-
-      # Deploy and verify the mod installation
-      - name: Deploy and Verify
+      # Deploy mod and configure server
+      - name: Deploy Mod
         id: deploy
         env:
-          INSTANCE_ID: ${{ steps.instance.outputs.instance_id }}
+          INSTANCE_IP: ${{ needs.terraform_deploy.outputs.instance_ip }}
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
         run: |
-          echo "Starting deployment using AWS Systems Manager..."
+          # Make deployment script executable
+          chmod +x .github/scripts/deploy.sh
           
-          # First, create mods directory
-          aws ssm send-command \
-            --instance-ids "$INSTANCE_ID" \
-            --document-name "AWS-RunShellScript" \
-            --parameters 'commands=["mkdir -p /opt/minecraft/server/mods"]' \
-            --output text \
-            --query "Command.CommandId" > prep_command_id.txt
-          
-          # Wait for directory creation
-          while true; do
-            STATUS=$(aws ssm list-command-invocations \
-              --command-id "$(cat prep_command_id.txt)" \
-              --details \
-              --query "CommandInvocations[0].Status" \
-              --output text)
-            
-            if [[ "$STATUS" == "Success" ]]; then
-              break
-            elif [[ "$STATUS" == "Failed" || "$STATUS" == "Cancelled" || "$STATUS" == "TimedOut" ]]; then
-              echo "Error: Directory creation failed with status: $STATUS"
-              exit 1
-            fi
-            sleep 5
-          done
-          
-          # Prepare deployment script
-          SCRIPT_CONTENT=$(cat .github/scripts/deploy.sh | tr -d '\r' | sed 's/"/\\"/g')
-          
-          # Execute deployment script via SSM
-          aws ssm send-command \
-            --instance-ids "$INSTANCE_ID" \
-            --document-name "AWS-RunShellScript" \
-            --parameters "{\"commands\":[\"echo '$SCRIPT_CONTENT' > /tmp/deploy.sh\",\"chmod +x /tmp/deploy.sh\",\"sudo /tmp/deploy.sh\"]}" \
-            --output text \
-            --query "Command.CommandId" > command_id.txt
-          
-          COMMAND_ID=$(cat command_id.txt)
-          echo "Deployment command ID: $COMMAND_ID"
-          
-          # Monitor deployment progress
-          while true; do
-            STATUS=$(aws ssm list-command-invocations \
-              --command-id "$COMMAND_ID" \
-              --details \
-              --query "CommandInvocations[0].Status" \
-              --output text)
-            
-            # Stream command output
-            aws ssm get-command-invocation \
-              --command-id "$COMMAND_ID" \
-              --instance-id "$INSTANCE_ID" \
-              --query "StandardOutputContent" \
-              --output text || true
-            
-            if [[ "$STATUS" == "Success" ]]; then
-              echo "Deployment completed successfully"
-              break
-            elif [[ "$STATUS" == "Failed" || "$STATUS" == "Cancelled" || "$STATUS" == "TimedOut" ]]; then
-              echo "Error: Deployment failed with status: $STATUS"
-              aws ssm get-command-invocation \
-                --command-id "$COMMAND_ID" \
-                --instance-id "$INSTANCE_ID" \
-                --query "StandardErrorContent" \
-                --output text || true
-              exit 1
-            fi
-            
-            echo "Waiting for deployment to complete... Current status: $STATUS"
-            sleep 10
-          done
+          # Run deployment script
+          .github/scripts/deploy.sh
