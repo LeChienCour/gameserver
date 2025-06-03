@@ -11,14 +11,64 @@ echo "-----END RSA PRIVATE KEY-----" >> ~/.ssh/game_server_key
 chmod 600 ~/.ssh/game_server_key
 
 # Get instance public IP
-INSTANCE_IP="54.163.77.186"
+INSTANCE_IP="${INSTANCE_IP:-54.163.77.186}"
 
-# Get WebSocket and Cognito configuration from SSM Parameter Store
-echo "Fetching configuration values..."
-WEBSOCKET_STAGE_URL=$(aws ssm get-parameter --name "/gameserver/dev/websocket/stage_url" --with-decryption --query "Parameter.Value" --output text)
-WEBSOCKET_API_KEY=$(aws ssm get-parameter --name "/gameserver/dev/websocket/api_key" --with-decryption --query "Parameter.Value" --output text)
-USER_POOL_ID=$(aws ssm get-parameter --name "/gameserver/dev/cognito/user_pool_id" --with-decryption --query "Parameter.Value" --output text)
-USER_POOL_CLIENT_ID=$(aws ssm get-parameter --name "/gameserver/dev/cognito/user_pool_client_id" --with-decryption --query "Parameter.Value" --output text)
+# Function to safely get SSM parameter with fallback
+get_ssm_param() {
+    local param_name="$1"
+    local default_value="$2"
+    local value
+
+    if value=$(aws ssm get-parameter --name "$param_name" --with-decryption --query "Parameter.Value" --output text 2>/dev/null); then
+        echo "$value"
+    else
+        echo "$default_value"
+    fi
+}
+
+# Determine the stage
+if [ -n "$PR_NUMBER" ]; then
+    STAGE="pr-${PR_NUMBER}"
+elif [ -n "$STAGE" ]; then
+    # Validate stage name
+    case "$STAGE" in
+        "dev"|"qa"|"prod")
+            echo "Using provided stage: $STAGE"
+            ;;
+        *)
+            echo "::error::Invalid stage name: $STAGE. Must be one of: dev, qa, prod"
+            exit 1
+            ;;
+    esac
+else
+    echo "No stage specified, defaulting to dev"
+    STAGE="dev"
+fi
+
+echo "Using stage: $STAGE"
+
+# Set appropriate default values based on stage
+case "$STAGE" in
+    "prod")
+        DEFAULT_WS_URL="wss://api.gameserver.example.com"
+        ;;
+    "qa")
+        DEFAULT_WS_URL="wss://qa-api.gameserver.example.com"
+        ;;
+    "pr-"*)
+        DEFAULT_WS_URL="wss://${STAGE}-api.gameserver.example.com"
+        ;;
+    *)  # dev and any other case
+        DEFAULT_WS_URL="wss://dev-api.gameserver.example.com"
+        ;;
+esac
+
+# Try to get values from SSM, fall back to stage-appropriate defaults
+echo "Fetching configuration values for stage: $STAGE"
+WEBSOCKET_STAGE_URL=$(get_ssm_param "/gameserver/$STAGE/websocket/stage_url" "$DEFAULT_WS_URL")
+WEBSOCKET_API_KEY=$(get_ssm_param "/gameserver/$STAGE/websocket/api_key" "default-api-key-for-$STAGE")
+USER_POOL_ID=$(get_ssm_param "/gameserver/$STAGE/cognito/user_pool_id" "us-east-1_dummy_$STAGE")
+USER_POOL_CLIENT_ID=$(get_ssm_param "/gameserver/$STAGE/cognito/user_pool_client_id" "client-id-$STAGE")
 
 # Create mods directory and set permissions
 echo "Setting up mods directory..."
@@ -138,7 +188,7 @@ useSystemDefaultMic = true
 microphoneBoost = 1.0
 
 #Enable debug logging for voice chat
-enableDebugLogging = true
+enableDebugLogging = ${STAGE != "prod"}
 EOF"
 
 # Create voice chat log directory
