@@ -27,10 +27,4 @@ variable "websocket_api_key" {
   description = "API key for WebSocket API authentication"
   type        = string
   sensitive   = true
-}
-
-variable "ssh_private_key" {
-  description = "The SSH private key to store in SSM Parameter Store"
-  type        = string
-  sensitive   = true
 } 

@@ -5,9 +5,6 @@ on:
     branches:
       - main
     types: [opened, synchronize, reopened]
-    # Prevent running on merge commits
-    paths-ignore:
-      - '.github/workflows/deploy-game-server.yaml'
 
 # Global minimum permissions
 permissions: read-all
@@ -42,6 +39,7 @@ jobs:
           TF_LOCK_TABLE: ${{ secrets.TF_LOCK_TABLE }}
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
         run: |
           if [ -z "$TF_STATE_BUCKET" ]; then
             echo "::error::TF_STATE_BUCKET secret is not set"
@@ -57,6 +55,10 @@ jobs:
           fi
           if [ -z "$AWS_SECRET_ACCESS_KEY" ]; then
             echo "::error::AWS_SECRET_ACCESS_KEY secret is not set"
+            exit 1
+          fi
+          if [ -z "$SSH_PRIVATE_KEY" ]; then
+            echo "::error::SSH_PRIVATE_KEY secret is not set"
             exit 1
           fi
           echo "All required secrets are set"
@@ -336,79 +338,47 @@ jobs:
         id: deploy
         env:
           INSTANCE_ID: ${{ steps.instance.outputs.instance_id }}
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
         run: |
           echo "Starting deployment using AWS Systems Manager..."
           
-          # First, copy the mod file to the instance
-          aws ssm send-command \
-            --instance-ids "$INSTANCE_ID" \
-            --document-name "AWS-RunShellScript" \
-            --parameters 'commands=["mkdir -p /opt/minecraft/server/mods"]' \
-            --output text \
-            --query "Command.CommandId" > prep_command_id.txt
+          # Set up SSH key for deployment with proper RSA format
+          mkdir -p ~/.ssh
+          echo "-----BEGIN RSA PRIVATE KEY-----" > ~/.ssh/game_server_key
+          echo "$SSH_PRIVATE_KEY" | fold -w 64 >> ~/.ssh/game_server_key
+          echo "-----END RSA PRIVATE KEY-----" >> ~/.ssh/game_server_key
+          chmod 600 ~/.ssh/game_server_key
           
-          # Wait for the preparation command to complete
-          while true; do
-            STATUS=$(aws ssm list-command-invocations \
-              --command-id "$(cat prep_command_id.txt)" \
-              --details \
-              --query "CommandInvocations[0].Status" \
-              --output text)
-            
-            if [[ "$STATUS" == "Success" ]]; then
+          # Get instance public IP
+          INSTANCE_IP="${{ needs.terraform_deploy.outputs.instance_ip }}"
+          
+          # Create mods directory and set permissions
+          ssh -i ~/.ssh/game_server_key -o StrictHostKeyChecking=no ec2-user@$INSTANCE_IP "sudo mkdir -p /opt/minecraft/server/mods && sudo chown -R ec2-user:ec2-user /opt/minecraft/server/mods"
+          
+          # Copy mod file to instance using SCP
+          scp -i ~/.ssh/game_server_key -o StrictHostKeyChecking=no \
+            ./mod_source/build/libs/*.jar ec2-user@$INSTANCE_IP:/opt/minecraft/server/mods/
+          
+          # Set permissions and restart server
+          ssh -i ~/.ssh/game_server_key -o StrictHostKeyChecking=no ec2-user@$INSTANCE_IP "sudo chmod -R 755 /opt/minecraft/server/mods"
+          ssh -i ~/.ssh/game_server_key -o StrictHostKeyChecking=no ec2-user@$INSTANCE_IP "sudo systemctl restart minecraft.service"
+          
+          # Wait for server to start and verify mod
+          echo "Waiting for server to start..."
+          for i in {1..60}; do
+            if ssh -i ~/.ssh/game_server_key -o StrictHostKeyChecking=no ec2-user@$INSTANCE_IP "sudo grep -q 'Done.*For help' /opt/minecraft/logs/latest.log && sudo grep -q 'VoiceChatMod' /opt/minecraft/logs/latest.log"; then
+              echo "Server started and mod loaded successfully"
               break
-            elif [[ "$STATUS" == "Failed" || "$STATUS" == "Cancelled" || "$STATUS" == "TimedOut" ]]; then
-              echo "Error: Directory creation failed with status: $STATUS"
+            fi
+            if [ $i -eq 60 ]; then
+              echo "Timeout waiting for server to start or mod to load"
               exit 1
             fi
             sleep 5
           done
           
-          # Convert the script to Unix line endings and escape it for JSON
-          SCRIPT_CONTENT=$(cat .github/scripts/deploy.sh | tr -d '\r' | sed 's/"/\\"/g')
-          
-          # Run deployment script through SSM
-          aws ssm send-command \
-            --instance-ids "$INSTANCE_ID" \
-            --document-name "AWS-RunShellScript" \
-            --parameters "{\"commands\":[\"echo '$SCRIPT_CONTENT' > /tmp/deploy.sh\",\"chmod +x /tmp/deploy.sh\",\"sudo /tmp/deploy.sh\"]}" \
-            --output text \
-            --query "Command.CommandId" > command_id.txt
-          
-          COMMAND_ID=$(cat command_id.txt)
-          echo "Deployment command ID: $COMMAND_ID"
-          
-          # Wait for command completion and stream output
-          while true; do
-            STATUS=$(aws ssm list-command-invocations \
-              --command-id "$COMMAND_ID" \
-              --details \
-              --query "CommandInvocations[0].Status" \
-              --output text)
-            
-            # Get command output
-            aws ssm get-command-invocation \
-              --command-id "$COMMAND_ID" \
-              --instance-id "$INSTANCE_ID" \
-              --query "StandardOutputContent" \
-              --output text || true
-            
-            if [[ "$STATUS" == "Success" ]]; then
-              echo "Deployment completed successfully"
-              break
-            elif [[ "$STATUS" == "Failed" || "$STATUS" == "Cancelled" || "$STATUS" == "TimedOut" ]]; then
-              echo "Error: Deployment failed with status: $STATUS"
-              aws ssm get-command-invocation \
-                --command-id "$COMMAND_ID" \
-                --instance-id "$INSTANCE_ID" \
-                --query "StandardErrorContent" \
-                --output text || true
-              exit 1
-            fi
-            
-            echo "Waiting for deployment to complete... Current status: $STATUS"
-            sleep 10
-          done
+          # Clean up SSH key
+          rm -f ~/.ssh/game_server_key
 
       - name: Report Status
         if: always()
@@ -455,13 +425,7 @@ jobs:
 
   cleanup_infrastructure:
     needs: [terraform_deploy, deploy_mod]
-    if: |
-      always() && 
-      (
-        needs.terraform_deploy.result == 'failure' ||
-        needs.deploy_mod.result == 'failure' ||
-        (needs.terraform_deploy.result == 'success' && needs.deploy_mod.result == 'success')
-      )
+    if: always() && (needs.terraform_deploy.result == 'failure' || needs.deploy_mod.result == 'failure' || (needs.terraform_deploy.result == 'success' && needs.deploy_mod.result == 'success'))
     runs-on: ubuntu-latest
     permissions:
       contents: read

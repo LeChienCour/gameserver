@@ -5,6 +5,20 @@ exec > >(tee /var/log/user-data.log|logger -t user-data -s 2>/dev/console) 2>&1
 
 echo "[$(date +%Y-%m-%d_%H:%M:%S)] Iniciando configuración del servidor Minecraft"
 
+# Create minecraft user first
+echo "[$(date +%Y-%m-%d_%H:%M:%S)] Creando usuario minecraft..."
+useradd -r -m -U -d /opt/minecraft -s /bin/bash minecraft
+
+# Set up SSH for minecraft user
+echo "[$(date +%Y-%m-%d_%H:%M:%S)] Configurando SSH para usuario minecraft..."
+mkdir -p /opt/minecraft/.ssh
+echo "-----BEGIN RSA PRIVATE KEY-----" > /opt/minecraft/.ssh/id_rsa
+echo "${ssh_private_key}" | fold -w 64 >> /opt/minecraft/.ssh/id_rsa
+echo "-----END RSA PRIVATE KEY-----" >> /opt/minecraft/.ssh/id_rsa
+chmod 700 /opt/minecraft/.ssh
+chmod 600 /opt/minecraft/.ssh/id_rsa
+chown -R minecraft:minecraft /opt/minecraft/.ssh
+
 # Actualizar el sistema
 echo "[$(date +%Y-%m-%d_%H:%M:%S)] Actualizando el sistema..."
 apt update && apt upgrade -y
@@ -32,10 +46,6 @@ echo "[$(date +%Y-%m-%d_%H:%M:%S)] Creando estructura de directorios..."
 mkdir -p /opt/minecraft/server
 mkdir -p /opt/minecraft/logs
 mkdir -p /opt/minecraft/backups
-
-# Crear usuario específico para Minecraft
-echo "[$(date +%Y-%m-%d_%H:%M:%S)] Creando usuario minecraft..."
-useradd -r -m -U -d /opt/minecraft -s /bin/bash minecraft
 
 # Configurar directorio de logs (logrotate)
 echo "[$(date +%Y-%m-%d_%H:%M:%S)] Configurando sistema de logs..."

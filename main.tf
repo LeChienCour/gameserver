@@ -22,6 +22,11 @@ provider "aws" {
 # Data Sources
 data "aws_caller_identity" "current" {}
 
+# Get key pair name from SSM parameter
+data "aws_ssm_parameter" "key_pair" {
+  name = "/gameserver/ec2/key_pair"
+}
+
 # Find latest Amazon Linux 2 AMI
 data "aws_ami" "amazon_linux_2" {
   most_recent = true
@@ -101,6 +106,7 @@ module "ec2_game_server" {
   websocket_port      = var.websocket_port
   user_pool_id        = module.cognito.user_pool_id
   user_pool_client_id = module.cognito.user_pool_client_id
+  key_name            = data.aws_ssm_parameter.key_pair.value
   stage               = var.stage
   environment         = var.environment
 }
@@ -237,14 +243,13 @@ resource "aws_s3_bucket_versioning" "audio_storage" {
   }
 }
 
-# Enable server-side encryption for the S3 bucket
+# Enable server-side encryption for the S3 bucket using AWS managed keys
 resource "aws_s3_bucket_server_side_encryption_configuration" "audio_storage" {
   bucket = aws_s3_bucket.audio_storage.id
 
   rule {
     apply_server_side_encryption_by_default {
-      kms_master_key_id = module.kms.key_arn
-      sse_algorithm     = "aws:kms"
+      sse_algorithm = "AES256"
     }
   }
 }
@@ -279,5 +284,4 @@ module "ssm" {
   websocket_api_id    = module.api_gateway.api_id
   websocket_stage_url = module.api_gateway.api_endpoint
   websocket_api_key   = module.api_gateway.api_key
-  ssh_private_key     = module.ec2_game_server.ssh_private_key
 }

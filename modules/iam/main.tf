@@ -69,15 +69,6 @@ resource "aws_iam_role_policy" "lambda_policy" {
       {
         Effect = "Allow"
         Action = [
-          "kms:Encrypt",
-          "kms:Decrypt",
-          "kms:GenerateDataKey"
-        ]
-        Resource = var.kms_key_arn
-      },
-      {
-        Effect = "Allow"
-        Action = [
           "events:PutEvents"
         ]
         Resource = [

@@ -1,10 +1,3 @@
-# Store SSH private key
-resource "aws_ssm_parameter" "ssh_private_key" {
-  name  = "/minecraft/${var.stage}/ssh_private_key"
-  type  = "SecureString"
-  value = var.ssh_private_key
-}
-
 # Store User Pool ID
 resource "aws_ssm_parameter" "user_pool_id" {
   name        = "/game-server/${var.stage}/cognito/user-pool-id"

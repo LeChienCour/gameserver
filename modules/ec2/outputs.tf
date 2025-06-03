@@ -18,9 +18,3 @@ output "instance_role_arn" {
   description = "ARN of the IAM role attached to the instance"
   value       = aws_iam_role.game_server_role.arn
 }
-
-output "ssh_private_key" {
-  description = "The private key for SSH access to the instance"
-  value       = tls_private_key.ssh_key.private_key_pem
-  sensitive   = true
-}
