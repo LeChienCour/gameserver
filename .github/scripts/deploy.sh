@@ -157,41 +157,31 @@ sudo chmod 644 /opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json
 
 # Create voice chat configuration file
 echo "Creating voice chat configuration..."
-ssh -i ~/.ssh/game_server_key -o StrictHostKeyChecking=no ec2-user@$INSTANCE_IP "cat > /opt/minecraft/server/runs/client/config/voicechatmod-common.toml << EOF
-#Enable or disable the voice chat functionality globally.
-enableVoiceChat = true
+CONFIG_CONTENT="enableVoiceChat = true
 
 #Default voice chat volume (0.0 to 1.0). This might be overridden by client-side settings later.
-# Default: 0.7
-# Range: 0.0 ~ 1.0
 defaultVolume = 0.7
 
-#Maximum distance (in blocks) at which players can hear each other. Set to 0 for global chat (if server supports).
-# Default: 64
-# Range: 0 ~ 256
+#Maximum distance (in blocks) at which players can hear each other.
 maxVoiceDistance = 64
 
 #Number of times to attempt reconnection to the voice gateway if connection is lost.
-# Default: 3
-# Range: 0 ~ 10
 reconnectionAttempts = 3
 
 #Delay in seconds between reconnection attempts.
-# Default: 5
-# Range: 1 ~ 30
 reconnectionDelay = 5
 
 #WebSocket Gateway URL for voice chat communication
-websocketStageUrl = \"${WEBSOCKET_STAGE_URL}\"
+websocketStageUrl = \"$WEBSOCKET_STAGE_URL\"
 
 #API Key for WebSocket Gateway authentication
-websocketApiKey = \"${WEBSOCKET_API_KEY}\"
+websocketApiKey = \"$WEBSOCKET_API_KEY\"
 
 #Cognito User Pool ID for authentication
-userPoolId = \"${USER_POOL_ID}\"
+userPoolId = \"$USER_POOL_ID\"
 
 #Cognito User Pool Client ID for authentication
-userPoolClientId = \"${USER_POOL_CLIENT_ID}\"
+userPoolClientId = \"$USER_POOL_CLIENT_ID\"
 
 #The name of the selected microphone device. Leave empty to use system default.
 selectedMicrophone = \"\"
@@ -200,13 +190,19 @@ selectedMicrophone = \"\"
 useSystemDefaultMic = true
 
 #Microphone boost/gain level (1.0 is normal, increase for quiet mics).
-# Default: 1.0
-# Range: 0.1 ~ 5.0
 microphoneBoost = 1.0
 
-#Enable debug logging for voice chat
-enableDebugLogging = ${STAGE != "prod"}
-EOF"
+#Enable debug logging for voice chat"
+
+if [ "$STAGE" = "prod" ]; then
+    CONFIG_CONTENT="$CONFIG_CONTENT
+enableDebugLogging = false"
+else
+    CONFIG_CONTENT="$CONFIG_CONTENT
+enableDebugLogging = true"
+fi
+
+ssh -i ~/.ssh/game_server_key -o StrictHostKeyChecking=no ec2-user@$INSTANCE_IP "echo '$CONFIG_CONTENT' > /opt/minecraft/server/runs/client/config/voicechatmod-common.toml"
 
 # Create voice chat log directory
 echo "Setting up voice chat log directory..."
