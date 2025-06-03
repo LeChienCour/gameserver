@@ -132,7 +132,6 @@ module "iam" {
 
   prefix            = "${var.prefix}-${var.stage}"
   audio_bucket_name = aws_s3_bucket.audio_storage.id
-  kms_key_arn       = module.kms.key_arn
   event_bus_arn     = module.eventbridge.event_bus_arn
   connections_table = var.connections_table
   environment       = var.environment
@@ -141,16 +140,6 @@ module "iam" {
   depends_on = [
     aws_s3_bucket.audio_storage
   ]
-}
-
-# KMS Module
-module "kms" {
-  source = "./modules/kms"
-
-  prefix       = "${var.prefix}-${var.stage}"
-  environment  = var.environment
-  stage        = var.stage
-  project_name = var.project_name
 }
 
 # Lambda Module
