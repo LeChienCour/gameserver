@@ -262,18 +262,10 @@ jobs:
     needs: [terraform_deploy]
     runs-on: ubuntu-latest
     permissions:
-      contents: read        # For checkout
-      pull-requests: write  # For commenting results
-      id-token: write      # For AWS authentication
-      checks: write        # For test results
+      contents: read
+      pull-requests: write
     steps:
-      - name: Configure PR Test Workspace
-        id: workspace
-        run: |
-          PR_NUMBER=$(echo $GITHUB_REF | cut -d'/' -f3)
-          WORKSPACE="pr-${PR_NUMBER}"
-          echo "workspace=$WORKSPACE" >> $GITHUB_OUTPUT
-
+      # Set up AWS credentials first
       - name: Set up AWS CLI
         uses: aws-actions/configure-aws-credentials@v4.0.2
         with:
@@ -281,18 +273,50 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: us-east-1
 
+      # Verify AWS credentials and SSM access
+      - name: Verify AWS Access
+        run: |
+          echo "Verifying AWS credentials..."
+          aws sts get-caller-identity
+          
+          echo "Testing SSM parameter access..."
+          # Test access to required SSM parameters
+          PR_NUMBER=$(echo $GITHUB_REF | cut -d'/' -f3)
+          STAGE="pr-${PR_NUMBER}"
+          
+          PARAMS=(
+            "/gameserver/$STAGE/websocket/stage_url"
+            "/gameserver/$STAGE/websocket/api_key"
+            "/gameserver/$STAGE/cognito/user_pool_id"
+            "/gameserver/$STAGE/cognito/user_pool_client_id"
+          )
+          
+          for param in "${PARAMS[@]}"; do
+            echo "Testing access to $param"
+            if ! aws ssm get-parameter --name "$param" --with-decryption >/dev/null 2>&1; then
+              echo "::warning::SSM parameter $param not found, this is expected for new PR environments"
+            fi
+          done
+          echo "✅ AWS credentials verification completed"
+
+      # Get repository code (includes deployment scripts)
+      - uses: actions/checkout@v4.1.1
+
+      # Get mod source code
       - uses: actions/checkout@v4.1.1
         with:
           repository: LeChienCour/VoiceChatMod
           path: ./mod_source
           ref: main
 
+      # Set up Java for mod building
       - name: Set up JDK 17
         uses: actions/setup-java@v3.13.0
         with:
           java-version: '17'
           distribution: 'temurin'
 
+      # Build the mod
       - name: Build Mod
         id: build
         working-directory: ./mod_source
@@ -307,80 +331,25 @@ jobs:
           fi
           echo "mod_jar=$MOD_JAR" >> $GITHUB_OUTPUT
 
-      - name: Configure AWS Session Manager
-        run: |
-          # Install Session Manager plugin
-          curl "https://s3.amazonaws.com/session-manager-downloads/plugin/latest/ubuntu_64bit/session-manager-plugin.deb" -o "session-manager-plugin.deb"
-          sudo dpkg -i session-manager-plugin.deb
-          
-          # Verify installation
-          session-manager-plugin --version
-
-      - name: Get Instance ID
-        id: instance
-        run: |
-          # Get instance ID using the public IP
-          INSTANCE_IP="${{ needs.terraform_deploy.outputs.instance_ip }}"
-          INSTANCE_ID=$(aws ec2 describe-instances \
-            --filters "Name=ip-address,Values=$INSTANCE_IP" \
-            --query "Reservations[].Instances[?State.Name=='running'].InstanceId" \
-            --output text)
-          
-          if [ -z "$INSTANCE_ID" ]; then
-            echo "::error::Could not find instance ID for IP $INSTANCE_IP"
-            exit 1
-          fi
-          
-          echo "instance_id=$INSTANCE_ID" >> $GITHUB_OUTPUT
-          echo "Found instance ID: $INSTANCE_ID"
-
-      - name: Deploy and Verify
+      # Deploy mod and configure server
+      - name: Deploy Mod
         id: deploy
         env:
-          INSTANCE_ID: ${{ steps.instance.outputs.instance_id }}
+          INSTANCE_IP: ${{ needs.terraform_deploy.outputs.instance_ip }}
           SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
-          echo "Starting deployment using AWS Systems Manager..."
+          # Make deployment script executable
+          chmod +x .github/scripts/deploy.sh
           
-          # Set up SSH key for deployment with proper RSA format
-          mkdir -p ~/.ssh
-          echo "-----BEGIN RSA PRIVATE KEY-----" > ~/.ssh/game_server_key
-          echo "$SSH_PRIVATE_KEY" | fold -w 64 >> ~/.ssh/game_server_key
-          echo "-----END RSA PRIVATE KEY-----" >> ~/.ssh/game_server_key
-          chmod 600 ~/.ssh/game_server_key
+          # Export stage name for the script
+          export STAGE="pr-${PR_NUMBER}"
           
-          # Get instance public IP
-          INSTANCE_IP="${{ needs.terraform_deploy.outputs.instance_ip }}"
-          
-          # Create mods directory and set permissions
-          ssh -i ~/.ssh/game_server_key -o StrictHostKeyChecking=no ec2-user@$INSTANCE_IP "sudo mkdir -p /opt/minecraft/server/mods && sudo chown -R ec2-user:ec2-user /opt/minecraft/server/mods"
-          
-          # Copy mod file to instance using SCP
-          scp -i ~/.ssh/game_server_key -o StrictHostKeyChecking=no \
-            ./mod_source/build/libs/*.jar ec2-user@$INSTANCE_IP:/opt/minecraft/server/mods/
-          
-          # Set permissions and restart server
-          ssh -i ~/.ssh/game_server_key -o StrictHostKeyChecking=no ec2-user@$INSTANCE_IP "sudo chmod -R 755 /opt/minecraft/server/mods"
-          ssh -i ~/.ssh/game_server_key -o StrictHostKeyChecking=no ec2-user@$INSTANCE_IP "sudo systemctl restart minecraft.service"
-          
-          # Wait for server to start and verify mod
-          echo "Waiting for server to start..."
-          for i in {1..60}; do
-            if ssh -i ~/.ssh/game_server_key -o StrictHostKeyChecking=no ec2-user@$INSTANCE_IP "sudo grep -q 'Done.*For help' /opt/minecraft/logs/latest.log && sudo grep -q 'VoiceChatMod' /opt/minecraft/logs/latest.log"; then
-              echo "Server started and mod loaded successfully"
-              break
-            fi
-            if [ $i -eq 60 ]; then
-              echo "Timeout waiting for server to start or mod to load"
-              exit 1
-            fi
-            sleep 5
-          done
-          
-          # Clean up SSH key
-          rm -f ~/.ssh/game_server_key
+          # Run deployment script
+          .github/scripts/deploy.sh
 
-      - name: Report Status
+      # Update PR with deployment results
+      - name: Update PR with Deployment Results
         if: always()
         uses: actions/github-script@v7.0.1
         with:
@@ -399,28 +368,17 @@ jobs:
               logDetails = '\n\n<details><summary>Error Log</summary>\n\n```\n' + errorLog + '\n```\n</details>';
             }
             
-            const summary = `### Minecraft Server Deployment ${status}
+            const comment = `### Minecraft Server Deployment ${status}
             
             **Status:** ${status} ${message}
             **Server IP:** \`${ip}\`
-            
-            ${status === '✅' ? 
-              '✅ Server is running and ready to use' : 
-              '❌ Deployment encountered issues - check workflow logs for details'
-            }${logDetails}`;
-            
-            // Split long messages if needed
-            const maxLength = 65536; // GitHub's comment length limit
-            let finalSummary = summary;
-            if (summary.length > maxLength) {
-              finalSummary = summary.substring(0, maxLength - 3) + '...';
-            }
+            ${logDetails}`;
             
             await github.rest.issues.createComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: context.issue.number,
-              body: finalSummary
+              body: comment
             });
 
   cleanup_infrastructure:
