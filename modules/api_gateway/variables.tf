@@ -22,7 +22,7 @@ variable "cloudwatch_role_arn" {
 variable "log_retention_days" {
   description = "Number of days to retain CloudWatch logs"
   type        = number
-  default     = 30
+  default     = 7
 }
 
 variable "throttle_burst_limit" {
@@ -45,36 +45,41 @@ variable "quota_limit" {
 
 # Lambda ARNs for WebSocket integrations
 variable "lambda_connect_arn" {
-  description = "ARN of the Lambda function for WebSocket connect"
+  description = "ARN of the WebSocket $connect Lambda function"
   type        = string
 }
 
 variable "lambda_disconnect_arn" {
-  description = "ARN of the Lambda function for WebSocket disconnect"
+  description = "ARN of the WebSocket $disconnect Lambda function"
   type        = string
 }
 
 variable "lambda_message_arn" {
-  description = "ARN of the Lambda function for WebSocket message handling"
+  description = "ARN of the WebSocket $default and message Lambda function"
   type        = string
 }
 
-variable "vpc_endpoint_id" {
-  description = "ID of the VPC Endpoint for API Gateway"
-  type        = string
-}
-
+# Optional VPC Configuration
 variable "vpc_id" {
-  description = "ID of the VPC"
+  description = "ID of the VPC (optional)"
   type        = string
-}
-
-variable "security_groups" {
-  description = "List of security group IDs for the API Gateway VPC endpoint"
-  type        = list(string)
+  default     = null
 }
 
 variable "subnet_ids" {
-  description = "List of subnet IDs for the API Gateway VPC endpoint"
+  description = "List of subnet IDs for VPC endpoint (optional)"
   type        = list(string)
+  default     = []
+}
+
+variable "vpc_endpoint_id" {
+  description = "ID of the VPC endpoint (optional)"
+  type        = string
+  default     = null
+}
+
+variable "security_groups" {
+  description = "List of security group IDs for VPC endpoint (optional)"
+  type        = list(string)
+  default     = []
 } 

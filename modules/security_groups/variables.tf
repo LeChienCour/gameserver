@@ -39,11 +39,6 @@ variable "allowed_game_ips" {
   default     = ["0.0.0.0/0"]
 }
 
-variable "game_protocol" {
-  description = "Protocol for game server (tcp/udp)"
-  type        = string
-}
-
 variable "stage" {
   description = "Deployment stage (e.g., dev, staging, prod)"
   type        = string
