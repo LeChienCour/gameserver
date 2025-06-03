@@ -78,9 +78,23 @@ ssh -i ~/.ssh/game_server_key -o StrictHostKeyChecking=no ec2-user@$INSTANCE_IP 
 echo "Setting up voice chat configuration..."
 ssh -i ~/.ssh/game_server_key -o StrictHostKeyChecking=no ec2-user@$INSTANCE_IP "sudo mkdir -p /opt/minecraft/server/runs/client/config && sudo chown -R ec2-user:ec2-user /opt/minecraft/server/runs/client/config"
 
+# Create CloudWatch log groups if they don't exist
+echo "Creating CloudWatch log groups for stage: $STAGE..."
+LOG_GROUPS=(
+    "/game-server/${STAGE}/cloud-init"
+    "/game-server/${STAGE}/system"
+    "/game-server/${STAGE}/minecraft"
+    "/game-server/${STAGE}/voicechat"
+)
+
+for LOG_GROUP in "${LOG_GROUPS[@]}"; do
+    aws logs create-log-group --log-group-name "$LOG_GROUP" --tags "Environment=${STAGE}" 2>/dev/null || true
+    aws logs put-retention-policy --log-group-name "$LOG_GROUP" --retention-in-days 7
+done
+
 # Update CloudWatch agent configuration to include voice chat logs
 echo "Updating CloudWatch configuration..."
-ssh -i ~/.ssh/game_server_key -o StrictHostKeyChecking=no ec2-user@$INSTANCE_IP "sudo cat > /opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json << 'EOF'
+ssh -i ~/.ssh/game_server_key -o StrictHostKeyChecking=no ec2-user@$INSTANCE_IP "cat > /tmp/amazon-cloudwatch-agent.json << 'EOF'
 {
   \"agent\": {
     \"metrics_collection_interval\": 60,
@@ -92,25 +106,25 @@ ssh -i ~/.ssh/game_server_key -o StrictHostKeyChecking=no ec2-user@$INSTANCE_IP 
         \"collect_list\": [
           {
             \"file_path\": \"/var/log/cloud-init-output.log\",
-            \"log_group_name\": \"/game-server/dev/cloud-init\",
+            \"log_group_name\": \"/game-server/${STAGE}/cloud-init\",
             \"log_stream_name\": \"{instance_id}\",
             \"retention_in_days\": 7
           },
           {
             \"file_path\": \"/var/log/messages\",
-            \"log_group_name\": \"/game-server/dev/system\",
+            \"log_group_name\": \"/game-server/${STAGE}/system\",
             \"log_stream_name\": \"{instance_id}\",
             \"retention_in_days\": 7
           },
           {
             \"file_path\": \"/opt/minecraft/server/logs/latest.log\",
-            \"log_group_name\": \"/game-server/dev/minecraft\",
+            \"log_group_name\": \"/game-server/${STAGE}/minecraft\",
             \"log_stream_name\": \"{instance_id}\",
             \"retention_in_days\": 7
           },
           {
             \"file_path\": \"/opt/minecraft/server/logs/voicechat/latest.log\",
-            \"log_group_name\": \"/game-server/dev/voicechat\",
+            \"log_group_name\": \"/game-server/${STAGE}/voicechat\",
             \"log_stream_name\": \"{instance_id}\",
             \"retention_in_days\": 7
           }
@@ -136,7 +150,10 @@ ssh -i ~/.ssh/game_server_key -o StrictHostKeyChecking=no ec2-user@$INSTANCE_IP 
     }
   }
 }
-EOF"
+EOF
+sudo mv /tmp/amazon-cloudwatch-agent.json /opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json
+sudo chown root:root /opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json
+sudo chmod 644 /opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json"
 
 # Create voice chat configuration file
 echo "Creating voice chat configuration..."
