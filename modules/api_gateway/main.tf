@@ -101,10 +101,9 @@ resource "aws_apigatewayv2_stage" "websocket" {
   }
 }
 
-# API Gateway Account Settings for CloudWatch Integration
+# API Gateway Account Settings
 resource "aws_api_gateway_account" "websocket" {
   cloudwatch_role_arn = var.cloudwatch_role_arn
-  reset_on_delete     = true
 }
 
 # WebSocket Routes and Integrations for API Gateway

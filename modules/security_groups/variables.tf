@@ -39,8 +39,8 @@ variable "allowed_game_ips" {
   default     = ["0.0.0.0/0"]
 }
 
-variable "vpc_endpoints_security_group_id" {
-  description = "ID of the VPC endpoints security group"
+variable "game_protocol" {
+  description = "Protocol for game server (tcp/udp)"
   type        = string
 }
 

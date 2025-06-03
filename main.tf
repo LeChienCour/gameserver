@@ -57,12 +57,6 @@ module "api_gateway" {
   lambda_disconnect_arn = module.lambda.lambda_functions["disconnect"]
   lambda_message_arn    = module.lambda.lambda_functions["message"]
 
-  # VPC Endpoint Configuration
-  vpc_endpoint_id = module.vpc.vpc_endpoint_execute_api_id
-  vpc_id          = module.vpc.vpc_id
-  security_groups = [module.vpc.vpc_endpoints_security_group_id]
-  subnet_ids      = module.vpc.public_subnets_ids
-
   depends_on = [
     module.vpc
   ]
@@ -208,7 +202,6 @@ module "security_groups" {
   security_group_name             = var.security_group_name
   allowed_game_ips                = ["0.0.0.0/0"]
   game_protocol                   = var.game_protocol
-  vpc_endpoints_security_group_id = module.vpc.vpc_endpoints_security_group_id
   stage                           = var.stage
   environment                     = var.environment
 }
