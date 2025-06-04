@@ -213,6 +213,53 @@ echo "Copying mod files..."
 scp -i ~/.ssh/game_server_key -o StrictHostKeyChecking=no \
   ./mod_source/build/libs/*.jar ec2-user@$INSTANCE_IP:/opt/minecraft/server/mods/
 
+# Check and install Java if needed
+echo "Checking Java installation..."
+ssh -i ~/.ssh/game_server_key -o StrictHostKeyChecking=no ec2-user@$INSTANCE_IP "if ! command -v java &> /dev/null || ! java -version 2>&1 | grep -q 'version \"17'; then
+    echo 'Installing Java 17...'
+    sudo yum remove -y java-* || true
+    sudo yum install -y java-17-amazon-corretto
+fi"
+
+# Verify Java version
+echo "Verifying Java version..."
+ssh -i ~/.ssh/game_server_key -o StrictHostKeyChecking=no ec2-user@$INSTANCE_IP "java -version"
+
+# Verify server.jar exists
+echo "Checking for server.jar..."
+ssh -i ~/.ssh/game_server_key -o StrictHostKeyChecking=no ec2-user@$INSTANCE_IP "if [ ! -f /opt/minecraft/server/server.jar ]; then
+    echo 'Error: server.jar not found in /opt/minecraft/server/'
+    exit 1
+fi"
+
+# Create systemd service file for Minecraft
+echo "Creating Minecraft systemd service..."
+ssh -i ~/.ssh/game_server_key -o StrictHostKeyChecking=no ec2-user@$INSTANCE_IP "sudo tee /etc/systemd/system/minecraft.service << 'EOF'
+[Unit]
+Description=Minecraft Server
+After=network.target
+
+[Service]
+WorkingDirectory=/opt/minecraft/server
+User=ec2-user
+Group=ec2-user
+Restart=always
+RestartSec=10
+
+ExecStart=/usr/bin/java -Xmx2G -Xms1G -jar server.jar nogui
+ExecStop=/usr/bin/screen -p 0 -S minecraft -X eval 'stuff \"say SERVER SHUTTING DOWN IN 10 SECONDS. SAVING ALL WORLDS.\"\015'
+ExecStop=/bin/sleep 10
+ExecStop=/usr/bin/screen -p 0 -S minecraft -X eval 'stuff \"save-all\"\015'
+ExecStop=/usr/bin/screen -p 0 -S minecraft -X eval 'stuff \"stop\"\015'
+
+[Install]
+WantedBy=multi-user.target
+EOF"
+
+# Reload systemd and enable service
+echo "Configuring Minecraft service..."
+ssh -i ~/.ssh/game_server_key -o StrictHostKeyChecking=no ec2-user@$INSTANCE_IP "sudo systemctl daemon-reload && sudo systemctl enable minecraft.service"
+
 # Set permissions and restart server
 echo "Setting permissions and restarting server..."
 ssh -i ~/.ssh/game_server_key -o StrictHostKeyChecking=no ec2-user@$INSTANCE_IP "sudo chmod -R 755 /opt/minecraft/server/mods /opt/minecraft/server/runs/client/config /opt/minecraft/server/logs/voicechat && sudo systemctl restart minecraft && sudo systemctl restart amazon-cloudwatch-agent"
