@@ -215,15 +215,25 @@ scp -i ~/.ssh/game_server_key -o StrictHostKeyChecking=no \
 
 # Check and install Java if needed
 echo "Checking Java installation..."
-ssh -i ~/.ssh/game_server_key -o StrictHostKeyChecking=no ec2-user@$INSTANCE_IP "if ! command -v java &> /dev/null || ! java -version 2>&1 | grep -q 'version \"17'; then
-    echo 'Installing Java 17...'
+ssh -i ~/.ssh/game_server_key -o StrictHostKeyChecking=no ec2-user@$INSTANCE_IP "if ! command -v java &> /dev/null || ! java -version 2>&1 | grep -q 'version \"21'; then
+    echo 'Installing Java 21...'
     sudo yum remove -y java-* || true
-    sudo yum install -y java-17-amazon-corretto
+    sudo yum install -y java-21-amazon-corretto
 fi"
 
 # Verify Java version
 echo "Verifying Java version..."
 ssh -i ~/.ssh/game_server_key -o StrictHostKeyChecking=no ec2-user@$INSTANCE_IP "java -version"
+
+# Download Minecraft server if not exists
+echo "Checking/Downloading Minecraft server..."
+ssh -i ~/.ssh/game_server_key -o StrictHostKeyChecking=no ec2-user@$INSTANCE_IP "cd /opt/minecraft/server && \
+if [ ! -f server.jar ]; then
+    echo 'Downloading Minecraft server...'
+    sudo curl -o server.jar 'https://piston-data.mojang.com/v1/objects/8dd1a28015f51b1803213892b50b7b4fc76e594d/server.jar'
+    sudo chown ec2-user:ec2-user server.jar
+    echo 'eula=true' > eula.txt
+fi"
 
 # Verify server.jar exists
 echo "Checking for server.jar..."
