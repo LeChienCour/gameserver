@@ -123,7 +123,7 @@ jobs:
           echo "Generated backend configuration:"
           cat backend.hcl
 
-      - name: Terraform Init with Backend Config
+      - name: Initialize Terraform
         id: init
         run: |
           # Set logging to show only errors
@@ -141,15 +141,15 @@ jobs:
           fi
           
           echo "Selecting/creating workspace..."
-          if ! terraform workspace select ${{ steps.config.outputs.workspace }} 2>/dev/null; then
-            echo "Creating new workspace: ${{ steps.config.outputs.workspace }}"
-            terraform workspace new ${{ steps.config.outputs.workspace }}
+          if ! terraform workspace select ${{ steps.stage.outputs.stage }} 2>/dev/null; then
+            echo "Creating new workspace: ${{ steps.stage.outputs.stage }}"
+            terraform workspace new ${{ steps.stage.outputs.stage }}
           fi
           
           # Verify workspace
           CURRENT_WORKSPACE=$(terraform workspace show)
-          if [ "$CURRENT_WORKSPACE" != "${{ steps.config.outputs.workspace }}" ]; then
-            echo "::error::Failed to switch to workspace ${{ steps.config.outputs.workspace }}, current workspace is $CURRENT_WORKSPACE"
+          if [ "$CURRENT_WORKSPACE" != "${{ steps.stage.outputs.stage }}" ]; then
+            echo "::error::Failed to switch to workspace ${{ steps.stage.outputs.stage }}, current workspace is $CURRENT_WORKSPACE"
             exit 1
           fi
           
@@ -589,19 +589,25 @@ jobs:
         with:
           terraform_version: 1.12.1
 
-      - name: Configure PR Environment
-        id: config
+      - name: Determine Stage
+        id: stage
         run: |
-          PR_NUMBER=$(echo $GITHUB_REF | cut -d'/' -f3)
-          STAGE="pr-${PR_NUMBER}"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            STAGE="${{ github.event.inputs.stage }}"
+          elif [ "${{ github.event_name }}" = "pull_request" ]; then
+            PR_NUMBER=$(echo $GITHUB_REF | cut -d'/' -f3)
+            STAGE="pr-${PR_NUMBER}"
+          else
+            STAGE="dev"  # Default to dev for main branch
+          fi
           echo "stage=$STAGE" >> $GITHUB_OUTPUT
-          echo "workspace=pr-${PR_NUMBER}" >> $GITHUB_OUTPUT  # Keep workspace for backward compatibility
+          echo "Cleaning up stage: $STAGE"
 
-      - name: Create Backend Config
+      - name: Create Backend Config File
         env:
           TF_STATE_BUCKET: ${{ secrets.TF_STATE_BUCKET }}
           TF_LOCK_TABLE: ${{ secrets.TF_LOCK_TABLE }}
-          STAGE: ${{ steps.config.outputs.stage }}
+          STAGE: ${{ steps.stage.outputs.stage }}
         run: |
           cat > backend.hcl << EOF
           bucket         = "$TF_STATE_BUCKET"
@@ -610,13 +616,20 @@ jobs:
           dynamodb_table = "$TF_LOCK_TABLE"
           encrypt        = true
           EOF
+          
+          echo "Generated backend configuration:"
+          cat backend.hcl
 
       - name: Initialize Terraform
-        run: terraform init -backend-config=backend.hcl -reconfigure
+        run: |
+          echo "Initializing Terraform..."
+          terraform init -backend-config=backend.hcl -reconfigure
+          
+          echo "Selecting workspace..."
+          terraform workspace select ${{ steps.stage.outputs.stage }}
 
       - name: Destroy Infrastructure
         env:
-          TF_WORKSPACE: ${{ steps.stage.outputs.workspace }}  # Keep for backward compatibility
           TF_VAR_stage: ${{ steps.stage.outputs.stage }}
         run: |
           echo "🧹 Cleaning up infrastructure..."
@@ -626,9 +639,9 @@ jobs:
       - name: Delete Workspace
         if: success()
         run: |
-          echo "🗑️ Deleting workspace: ${{ steps.config.outputs.workspace }}"
+          echo "🗑️ Deleting workspace: ${{ steps.stage.outputs.stage }}"
           terraform workspace select default
-          terraform workspace delete ${{ steps.config.outputs.workspace }}
+          terraform workspace delete ${{ steps.stage.outputs.stage }}
 
       - name: Notify Cleanup Status
         if: always()
