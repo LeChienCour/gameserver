@@ -129,12 +129,8 @@ difficulty=normal
 gamemode=survival
 EOF'
 
-# Install and configure CloudWatch agent
-echo "Installing CloudWatch agent..."
-yum install -y amazon-cloudwatch-agent
-
 # Create CloudWatch agent config
-cat > /opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json << 'EOF'
+cat << 'EOF' | sudo tee /opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json > /dev/null
 {
   "agent": {
     "metrics_collection_interval": 60,
@@ -169,12 +165,12 @@ aws logs create-log-group --log-group-name /minecraft/voice-chat-logs --region "
 
 # Start CloudWatch agent
 echo "Starting CloudWatch agent..."
-systemctl enable amazon-cloudwatch-agent
-systemctl start amazon-cloudwatch-agent
+sudo systemctl enable amazon-cloudwatch-agent
+sudo systemctl start amazon-cloudwatch-agent
 
 # Create Minecraft server service
 echo "Creating Minecraft server service..."
-cat > /etc/systemd/system/minecraft.service << 'EOF'
+cat << 'EOF' | sudo tee /etc/systemd/system/minecraft.service > /dev/null
 [Unit]
 Description=Minecraft NeoForge Server
 After=network.target
@@ -195,7 +191,7 @@ EOF
 
 # Enable and start Minecraft service
 echo "Enabling and starting Minecraft service..."
-systemctl enable minecraft
-systemctl start minecraft
+sudo systemctl enable minecraft
+sudo systemctl start minecraft
 
 echo "Instance setup completed successfully!" 
