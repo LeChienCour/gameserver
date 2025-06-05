@@ -29,53 +29,28 @@ cd /opt/minecraft/server
 
 # Download NeoForge installer and universal JAR
 echo "Downloading NeoForge files..."
-sudo -u ec2-user wget -v "https://maven.neoforged.net/releases/net/neoforged/forge/1.21.4-20241203.161809/neoforge-1.21.4-20241203.161809-installer.jar"
-sudo -u ec2-user wget -v "https://maven.neoforged.net/releases/net/neoforged/forge/1.21.4-20241203.161809/neoforge-1.21.4-20241203.161809-universal.jar"
+sudo -u ec2-user wget -v "https://maven.neoforged.net/releases/net/neoforged/neoforge/21.4.136/neoforge-21.4.136-universal.jar"
 
-# Verify downloads
-if [ ! -f "neoforge-1.21.4-20241203.161809-installer.jar" ] || [ ! -f "neoforge-1.21.4-20241203.161809-universal.jar" ]; then
-    echo "Failed to download NeoForge files"
-    exit 1
-fi
-
-echo "Running NeoForge installer..."
-# Run installer and capture both stdout and stderr
-sudo -u ec2-user java -jar "neoforge-1.21.4-20241203.161809-installer.jar" --installServer 2>&1 | tee /opt/minecraft/logs/neoforge-install.log
-
-# Check for success message in the log
-if ! grep -q "The server installed successfully" /opt/minecraft/logs/neoforge-install.log; then
-    echo "NeoForge installer failed"
-    echo "Installation log (last 10 lines):"
-    tail -n 10 /opt/minecraft/logs/neoforge-install.log
-    exit 1
-fi
-
-# List directory contents for debugging
-echo "Contents of /opt/minecraft/server:"
-ls -la /opt/minecraft/server
-
-# Verify the installed JAR
-if [ ! -f "/opt/minecraft/server/libraries/net/neoforged/neoforge/1.21.4-20241203.161809/neoforge-1.21.4-20241203.161809-server.jar" ]; then
-    echo "NeoForge installation failed - server JAR not found"
-    echo "Installation log (last 10 lines):"
-    tail -n 10 /opt/minecraft/logs/neoforge-install.log
+# Verify download
+if [ ! -f "neoforge-21.4.136-universal.jar" ]; then
+    echo "Failed to download NeoForge universal JAR"
     exit 1
 fi
 
 # Create symlink to server JAR
 echo "Creating symlink to server JAR..."
-sudo ln -sf "/opt/minecraft/server/libraries/net/neoforged/neoforge/1.21.4-20241203.161809/neoforge-1.21.4-20241203.161809-server.jar" "/opt/minecraft/server/server.jar"
+sudo ln -sf "neoforge-21.4.136-universal.jar" "server.jar"
 
 # Verify symlink was created
-if [ ! -L "/opt/minecraft/server/server.jar" ]; then
+if [ ! -L "server.jar" ]; then
     echo "Failed to create symlink to NeoForge server JAR"
     exit 1
 fi
 
-echo "✅ NeoForge installation verified"
+echo "✅ NeoForge setup completed"
 
 # Clean up installer
-sudo -u ec2-user rm -f "neoforge-1.21.4-20241203.161809-installer.jar"
+sudo -u ec2-user rm -f neoforge-21.4.136-universal.jar
 
 # Accept EULA and create basic server configuration
 echo "Configuring server..."
@@ -86,6 +61,14 @@ max-players=20
 difficulty=normal
 gamemode=survival
 EOF'
+
+# Install CloudWatch agent
+echo "Installing CloudWatch agent..."
+sudo yum install -y amazon-cloudwatch-agent
+
+# Create CloudWatch agent config directory
+echo "Creating CloudWatch agent config directory..."
+sudo mkdir -p /opt/aws/amazon-cloudwatch-agent/etc
 
 # Create CloudWatch agent config
 cat << 'EOF' | sudo tee /opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json > /dev/null

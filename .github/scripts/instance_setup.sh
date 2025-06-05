@@ -92,17 +92,17 @@ else
 
     # Download NeoForge installer and universal JAR
     echo "Downloading NeoForge files..."
-    sudo -u ec2-user wget -v "https://maven.neoforged.net/releases/net/neoforged/forge/1.21.4-20241203.161809/neoforge-1.21.4-20241203.161809-universal.jar"
+    sudo -u ec2-user wget -v "https://maven.neoforged.net/releases/net/neoforged/neoforge/21.4.136/neoforge-21.4.136-universal.jar"
 
     # Verify download
-    if [ ! -f "neoforge-1.21.4-20241203.161809-universal.jar" ]; then
+    if [ ! -f "neoforge-21.4.136-universal.jar" ]; then
         echo "Failed to download NeoForge universal JAR"
         exit 1
     fi
 
     # Create symlink to server JAR
     echo "Creating symlink to server JAR..."
-    sudo ln -sf "neoforge-1.21.4-20241203.161809-universal.jar" "server.jar"
+    sudo ln -sf "neoforge-21.4.136-universal.jar" "server.jar"
 
     # Verify symlink was created
     if [ ! -L "server.jar" ]; then
@@ -113,7 +113,7 @@ else
     echo "✅ NeoForge setup completed"
 
     # Clean up installer
-    sudo -u ec2-user rm -f neoforge-1.21.4-20241203.161809-universal.jar
+    sudo -u ec2-user rm -f neoforge-21.4.136-universal.jar
 fi
 
 # Accept EULA and create basic server configuration
@@ -125,6 +125,10 @@ max-players=20
 difficulty=normal
 gamemode=survival
 EOF'
+
+# Create CloudWatch agent config directory
+echo "Creating CloudWatch agent config directory..."
+sudo mkdir -p /opt/aws/amazon-cloudwatch-agent/etc
 
 # Create CloudWatch agent config
 cat << 'EOF' | sudo tee /opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json > /dev/null
