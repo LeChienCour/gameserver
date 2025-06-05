@@ -99,7 +99,7 @@ else
 
     echo "Running NeoForge installer..."
     # Run installer and capture both stdout and stderr
-    sudo -u ec2-user java -jar neoforge-21.4.136-installer.jar --installServer --verbose 2>&1 | tee /opt/minecraft/logs/neoforge-install.log
+    sudo -u ec2-user java -jar neoforge-21.4.136-installer.jar --installServer 2>&1 | tee /opt/minecraft/logs/neoforge-install.log
 
     # Check installer exit status
     INSTALL_STATUS=${PIPESTATUS[0]}
