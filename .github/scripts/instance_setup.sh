@@ -85,17 +85,24 @@ if [ -f "$NEOFORGE_JAR" ] && [ -L "/opt/minecraft/server/neoforge-21.4.136.jar" 
 else
     # Ensure proper permissions and create necessary directories
     echo "Setting up directories and permissions..."
+    sudo mkdir -p /opt/minecraft/server/libraries/net/neoforged/neoforge/21.4.136
     sudo mkdir -p /opt/minecraft/server/libraries/net/neoforged/neoform/1.21.4-20241203.161809
     sudo chown -R ec2-user:ec2-user /opt/minecraft/server
     sudo chmod -R 755 /opt/minecraft/server
 
-    # Download NeoForge installer with verbose output
-    echo "Downloading NeoForge installer..."
+    # Download NeoForge installer and universal JAR
+    echo "Downloading NeoForge files..."
     sudo -u ec2-user wget -v https://maven.neoforged.net/releases/net/neoforged/neoforge/21.4.136/neoforge-21.4.136-installer.jar
+    sudo -u ec2-user wget -v https://maven.neoforged.net/releases/net/neoforged/neoforge/21.4.136/neoforge-21.4.136-universal.jar -O /opt/minecraft/server/libraries/net/neoforged/neoforge/21.4.136/neoforge-21.4.136-universal.jar
 
-    # Verify installer was downloaded
+    # Verify files were downloaded
     if [ ! -f "neoforge-21.4.136-installer.jar" ]; then
         echo "::error::Failed to download NeoForge installer"
+        exit 1
+    fi
+
+    if [ ! -f "/opt/minecraft/server/libraries/net/neoforged/neoforge/21.4.136/neoforge-21.4.136-universal.jar" ]; then
+        echo "::error::Failed to download NeoForge universal JAR"
         exit 1
     fi
 
