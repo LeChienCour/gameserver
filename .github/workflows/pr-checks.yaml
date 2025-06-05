@@ -269,6 +269,8 @@ jobs:
       contents: read
       pull-requests: write
       id-token: write      # For AWS authentication
+    outputs:
+      instance_ip: ${{ env.INSTANCE_IP }}
     strategy:
       matrix:
         task: [instance-setup, mod-build]
@@ -446,6 +448,8 @@ jobs:
     permissions:
       contents: read
       pull-requests: write
+    env:
+      INSTANCE_IP: ${{ needs.terraform_deploy.outputs.instance_ip }}
     steps:
       # Set up AWS credentials
       - name: Set up AWS CLI
@@ -460,8 +464,8 @@ jobs:
 
       - name: Debug Instance IP
         run: |
-          echo "Instance IP from Terraform: ${{ needs.terraform_deploy.outputs.instance_ip }}"
-          if [ -z "${{ needs.terraform_deploy.outputs.instance_ip }}" ]; then
+          echo "Instance IP from Terraform: $INSTANCE_IP"
+          if [ -z "$INSTANCE_IP" ]; then
             echo "::error::Instance IP is empty"
             exit 1
           fi
@@ -469,7 +473,7 @@ jobs:
       - name: Deploy to EC2
         uses: appleboy/ssh-action@master
         with:
-          host: ${{ needs.terraform_deploy.outputs.instance_ip }}
+          host: ${{ env.INSTANCE_IP }}
           username: ec2-user
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
@@ -485,7 +489,7 @@ jobs:
           script: |
             const status = '${{ steps.deploy.outcome }}' === 'success' ? '✅' : '❌';
             const message = '${{ steps.deploy.outputs.message }}' || 'No status message available';
-            const ip = '${{ needs.terraform_deploy.outputs.instance_ip }}';
+            const ip = '${{ env.INSTANCE_IP }}';
             
             let logDetails = '';
             if (status === '✅' && '${{ steps.deploy.outputs.startup_log }}') {
