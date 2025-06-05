@@ -274,17 +274,30 @@ jobs:
       - uses: actions/checkout@v4
       
       - name: Set up JDK 21
+        if: matrix.task == 'mod-build'
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
           java-version: '21'
           
-      - name: Build with Gradle
-        uses: gradle/gradle-build-action@v2
+      - name: Clone and Build VoiceChatMod
+        if: matrix.task == 'mod-build'
+        run: |
+          git clone https://github.com/LeChienCour/VoiceChatMod.git
+          cd VoiceChatMod
+          git checkout main
+          ./gradlew build
+          
+      - name: Upload Build Artifacts
+        if: matrix.task == 'mod-build'
+        uses: actions/upload-artifact@v4
         with:
-          arguments: build
+          name: voicechat-mod
+          path: VoiceChatMod/build/libs/*.jar
+          if-no-files-found: error
           
       - name: Verify AWS Access
+        if: matrix.task == 'instance-setup'
         run: |
           if ! aws sts get-caller-identity; then
             echo "::error::Failed to authenticate with AWS. Please check credentials."
@@ -292,6 +305,7 @@ jobs:
           fi
           
       - name: Setup Instance
+        if: matrix.task == 'instance-setup'
         run: |
           # Create SSH key file
           mkdir -p ~/.ssh
@@ -307,12 +321,22 @@ jobs:
           # Execute setup script on instance with AWS credentials
           ssh -i ~/.ssh/game_server_key -o StrictHostKeyChecking=no ec2-user@$INSTANCE_IP "chmod +x ~/setup.sh && sudo AWS_ACCESS_KEY_ID=${{ secrets.AWS_ACCESS_KEY_ID }} AWS_SECRET_ACCESS_KEY=${{ secrets.AWS_SECRET_ACCESS_KEY }} AWS_REGION=${{ env.AWS_REGION }} ~/setup.sh"
           
-      - name: Upload Build Artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: mod-build
-          path: build/libs/*.jar
-          if-no-files-found: error
+      - name: Copy Mod to Instance
+        if: matrix.task == 'mod-build'
+        run: |
+          # Create SSH key file
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/game_server_key
+          chmod 600 ~/.ssh/game_server_key
+          
+          # Get instance IP from Terraform output
+          INSTANCE_IP=$(aws ssm get-parameter --name "/minecraft/pr-${{ github.event.pull_request.number }}/instance-ip" --query "Parameter.Value" --output text)
+          
+          # Copy the built mod to the instance
+          scp -i ~/.ssh/game_server_key -o StrictHostKeyChecking=no VoiceChatMod/build/libs/*.jar ec2-user@$INSTANCE_IP:/opt/minecraft/mods/
+          
+          # Set correct permissions
+          ssh -i ~/.ssh/game_server_key -o StrictHostKeyChecking=no ec2-user@$INSTANCE_IP "sudo chown ec2-user:ec2-user /opt/minecraft/mods/*.jar && sudo chmod 644 /opt/minecraft/mods/*.jar"
 
   deploy:
     needs: [build_mod]
