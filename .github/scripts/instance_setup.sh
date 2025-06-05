@@ -102,10 +102,15 @@ sudo -u ec2-user java -jar neoforge-21.4.136-installer.jar --installServer 2>&1 
 # Check installer exit status
 INSTALL_STATUS=${PIPESTATUS[0]}
 if [ $INSTALL_STATUS -ne 0 ]; then
-    echo "::error::NeoForge installer failed with exit code $INSTALL_STATUS"
-    echo "::error::Installation log:"
-    cat /opt/minecraft/logs/neoforge-install.log
-    exit 1
+    # Check for the success message in the log
+    if grep -q "The server installed successfully" /opt/minecraft/logs/neoforge-install.log; then
+        echo "NeoForge installer exited with code $INSTALL_STATUS but reports success. Continuing."
+    else
+        echo "::error::NeoForge installer failed with exit code $INSTALL_STATUS"
+        echo "::error::Installation log:"
+        cat /opt/minecraft/logs/neoforge-install.log
+        exit 1
+    fi
 fi
 
 # Verify NeoForge installation
