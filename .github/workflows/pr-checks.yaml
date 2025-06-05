@@ -344,7 +344,11 @@ jobs:
           chmod 600 ~/.ssh/game_server_key
           
           # Get instance IP from Terraform output
-          INSTANCE_IP=$(aws ssm get-parameter --name "/minecraft/pr-${{ github.event.pull_request.number }}/instance-ip" --query "Parameter.Value" --output text)
+          INSTANCE_IP=${{ needs.terraform_deploy.outputs.instance_ip }}
+          if [ -z "$INSTANCE_IP" ]; then
+            echo "::error::Failed to get instance IP from Terraform outputs"
+            exit 1
+          fi
           
           # Copy setup script to instance
           scp -i ~/.ssh/game_server_key -o StrictHostKeyChecking=no .github/scripts/instance_setup.sh ec2-user@$INSTANCE_IP:~/setup.sh
@@ -361,7 +365,11 @@ jobs:
           chmod 600 ~/.ssh/game_server_key
           
           # Get instance IP from Terraform output
-          INSTANCE_IP=$(aws ssm get-parameter --name "/minecraft/pr-${{ github.event.pull_request.number }}/instance-ip" --query "Parameter.Value" --output text)
+          INSTANCE_IP=${{ needs.terraform_deploy.outputs.instance_ip }}
+          if [ -z "$INSTANCE_IP" ]; then
+            echo "::error::Failed to get instance IP from Terraform outputs"
+            exit 1
+          fi
           
           # Copy the built mod to the instance
           scp -i ~/.ssh/game_server_key -o StrictHostKeyChecking=no VoiceChatMod/build/libs/*.jar ec2-user@$INSTANCE_IP:/opt/minecraft/mods/
