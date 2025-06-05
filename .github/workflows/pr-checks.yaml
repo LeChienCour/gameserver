@@ -339,6 +339,7 @@ jobs:
         working-directory: ./mod_source
         run: |
           chmod +x ./gradlew
+          ./gradlew wrapper --gradle-version 8.14
           ./gradlew build --no-daemon
           
           # Find the main mod JAR file (excluding sources and dev jars)
@@ -445,8 +446,8 @@ jobs:
             });
 
   cleanup_infrastructure:
-    needs: [terraform_deploy, build_mod]
-    if: always() && (needs.terraform_deploy.result == 'failure' || needs.build_mod.result == 'failure' || (needs.terraform_deploy.result == 'success' && needs.build_mod.result == 'success'))
+    needs: [terraform_deploy, build_mod, deploy]
+    if: always() && (needs.terraform_deploy.result == 'failure' || needs.build_mod.result == 'failure' || needs.deploy.result == 'failure' || (needs.terraform_deploy.result == 'success' && needs.build_mod.result == 'success' && needs.deploy.result == 'success'))
     runs-on: ubuntu-latest
     permissions:
       contents: read

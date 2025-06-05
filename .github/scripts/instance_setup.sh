@@ -18,126 +18,102 @@ fi
 
 echo "Using instance IP: $INSTANCE_IP"
 
-# Install Java and create directories
-echo "Installing Java and creating directories..."
-ssh -i ~/.ssh/game_server_key -o StrictHostKeyChecking=no ec2-user@$INSTANCE_IP "sudo yum install -y java-21-amazon-corretto-devel && \
-    sudo mkdir -p /opt/minecraft/server/mods /opt/minecraft/server/runs/client/config /opt/minecraft/server/logs/voicechat && \
-    sudo chown -R ec2-user:ec2-user /opt/minecraft/server"
+# Function to check if a command exists
+command_exists() {
+    command -v "$1" >/dev/null 2>&1
+}
 
-# Create CloudWatch log groups if they don't exist
+# Check if Java is installed
+if ! command_exists java; then
+    echo "Installing Java 21..."
+    # Add Amazon Corretto repository
+    sudo yum update -y
+    sudo yum install -y wget
+    wget https://corretto.aws/downloads/latest/amazon-corretto-21-x64-linux-jdk.rpm
+    sudo yum localinstall -y amazon-corretto-21-x64-linux-jdk.rpm
+    rm amazon-corretto-21-x64-linux-jdk.rpm
+    
+    # Verify Java installation
+    java -version
+else
+    echo "Java is already installed"
+    java -version
+fi
+
+# Check if Git is installed
+if ! command_exists git; then
+    echo "Installing Git..."
+    sudo yum install -y git
+else
+    echo "Git is already installed"
+fi
+
+# Create necessary directories
+echo "Creating Minecraft directories..."
+sudo mkdir -p /home/ec2-user/minecraft/{mods,config,runs,logs}
+sudo chown -R ec2-user:ec2-user /home/ec2-user/minecraft
+
+# Create CloudWatch log groups
 echo "Creating CloudWatch log groups..."
-LOG_GROUPS=(
-    "/game-server/${STAGE}/cloud-init"
-    "/game-server/${STAGE}/system"
-    "/game-server/${STAGE}/minecraft"
-    "/game-server/${STAGE}/voicechat"
-)
-
-for LOG_GROUP in "${LOG_GROUPS[@]}"; do
-    aws logs create-log-group --log-group-name "$LOG_GROUP" --tags "Environment=${STAGE}" 2>/dev/null || true
-    aws logs put-retention-policy --log-group-name "$LOG_GROUP" --retention-in-days 7
-done
+aws logs create-log-group --log-group-name /minecraft/server-logs || true
+aws logs create-log-group --log-group-name /minecraft/voice-chat-logs || true
 
 # Update CloudWatch agent configuration
-echo "Updating CloudWatch configuration..."
-ssh -i ~/.ssh/game_server_key -o StrictHostKeyChecking=no ec2-user@$INSTANCE_IP "cat > /tmp/amazon-cloudwatch-agent.json << 'EOF'
+echo "Updating CloudWatch agent configuration..."
+sudo tee /opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json > /dev/null << 'EOF'
 {
-  \"agent\": {
-    \"metrics_collection_interval\": 60,
-    \"run_as_user\": \"root\"
-  },
-  \"logs\": {
-    \"logs_collected\": {
-      \"files\": {
-        \"collect_list\": [
-          {
-            \"file_path\": \"/var/log/cloud-init-output.log\",
-            \"log_group_name\": \"/game-server/${STAGE}/cloud-init\",
-            \"log_stream_name\": \"{instance_id}\",
-            \"retention_in_days\": 7
-          },
-          {
-            \"file_path\": \"/var/log/messages\",
-            \"log_group_name\": \"/game-server/${STAGE}/system\",
-            \"log_stream_name\": \"{instance_id}\",
-            \"retention_in_days\": 7
-          },
-          {
-            \"file_path\": \"/opt/minecraft/server/logs/latest.log\",
-            \"log_group_name\": \"/game-server/${STAGE}/minecraft\",
-            \"log_stream_name\": \"{instance_id}\",
-            \"retention_in_days\": 7
-          },
-          {
-            \"file_path\": \"/opt/minecraft/server/logs/voicechat/latest.log\",
-            \"log_group_name\": \"/game-server/${STAGE}/voicechat\",
-            \"log_stream_name\": \"{instance_id}\",
-            \"retention_in_days\": 7
-          }
-        ]
-      }
+    "logs": {
+        "logs_collected": {
+            "files": {
+                "collect_list": [
+                    {
+                        "file_path": "/home/ec2-user/minecraft/logs/latest.log",
+                        "log_group_name": "/minecraft/server-logs",
+                        "log_stream_name": "{instance_id}",
+                        "timezone": "UTC"
+                    },
+                    {
+                        "file_path": "/home/ec2-user/minecraft/logs/voicechat.log",
+                        "log_group_name": "/minecraft/voice-chat-logs",
+                        "log_stream_name": "{instance_id}",
+                        "timezone": "UTC"
+                    }
+                ]
+            }
+        }
     }
-  },
-  \"metrics\": {
-    \"metrics_collected\": {
-      \"mem\": {
-        \"measurement\": [\"mem_used_percent\"]
-      },
-      \"swap\": {
-        \"measurement\": [\"swap_used_percent\"]
-      },
-      \"disk\": {
-        \"measurement\": [\"used_percent\"],
-        \"resources\": [\"/\"]
-      }
-    },
-    \"append_dimensions\": {
-      \"InstanceId\": \"\${aws:InstanceId}\"
-    }
-  }
 }
 EOF
-sudo mv /tmp/amazon-cloudwatch-agent.json /opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json
-sudo chown root:root /opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json
-sudo chmod 644 /opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json"
 
-# Download Minecraft server if not exists
-echo "Checking/Downloading Minecraft server..."
-ssh -i ~/.ssh/game_server_key -o StrictHostKeyChecking=no ec2-user@$INSTANCE_IP "cd /opt/minecraft/server && \
-if [ ! -f server.jar ]; then
-    echo 'Downloading Minecraft server...'
-    sudo curl -o server.jar 'https://piston-data.mojang.com/v1/objects/8dd1a28015f51b1803213892b50b7b4fc76e594d/server.jar'
-    sudo chown ec2-user:ec2-user server.jar
-    echo 'eula=true' > eula.txt
-fi"
+# Check if Minecraft server exists
+if [ ! -f "/home/ec2-user/minecraft/server.jar" ]; then
+    echo "Downloading Minecraft server..."
+    wget https://piston-data.mojang.com/v1/objects/8dd1a28015f51b1803213892b50b7b4fc76e594d/server.jar -O /home/ec2-user/minecraft/server.jar
+fi
 
-# Create systemd service file for Minecraft
-echo "Creating Minecraft systemd service..."
-ssh -i ~/.ssh/game_server_key -o StrictHostKeyChecking=no ec2-user@$INSTANCE_IP "sudo tee /etc/systemd/system/minecraft.service << 'EOF'
+# Create systemd service file
+echo "Creating Minecraft service..."
+sudo tee /etc/systemd/system/minecraft.service > /dev/null << 'EOF'
 [Unit]
 Description=Minecraft Server
 After=network.target
 
 [Service]
-WorkingDirectory=/opt/minecraft/server
+Type=simple
 User=ec2-user
-Group=ec2-user
-Restart=always
+WorkingDirectory=/home/ec2-user/minecraft
+ExecStart=/usr/bin/java -Xmx2G -Xms2G -jar server.jar nogui
+Restart=on-failure
 RestartSec=10
-
-ExecStart=/usr/bin/java -Xmx2G -Xms1G -jar server.jar nogui
-ExecStop=/usr/bin/screen -p 0 -S minecraft -X eval 'stuff \"say SERVER SHUTTING DOWN IN 10 SECONDS. SAVING ALL WORLDS.\"\015'
-ExecStop=/bin/sleep 10
-ExecStop=/usr/bin/screen -p 0 -S minecraft -X eval 'stuff \"save-all\"\015'
-ExecStop=/usr/bin/screen -p 0 -S minecraft -X eval 'stuff \"stop\"\015'
 
 [Install]
 WantedBy=multi-user.target
-EOF"
+EOF
 
 # Reload systemd and enable service
-echo "Configuring Minecraft service..."
-ssh -i ~/.ssh/game_server_key -o StrictHostKeyChecking=no ec2-user@$INSTANCE_IP "sudo systemctl daemon-reload && sudo systemctl enable minecraft.service"
+echo "Enabling Minecraft service..."
+sudo systemctl daemon-reload
+sudo systemctl enable minecraft
 
 # Clean up SSH key
 rm -f ~/.ssh/game_server_key
