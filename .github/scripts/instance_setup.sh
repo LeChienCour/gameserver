@@ -92,64 +92,28 @@ else
 
     # Download NeoForge installer and universal JAR
     echo "Downloading NeoForge files..."
-    sudo -u ec2-user wget -v https://maven.neoforged.net/releases/net/neoforged/neoforge/21.4.136/neoforge-21.4.136-installer.jar
-    sudo -u ec2-user wget -v https://maven.neoforged.net/releases/net/neoforged/neoforge/21.4.136/neoforge-21.4.136-universal.jar -O /opt/minecraft/server/libraries/net/neoforged/neoforge/21.4.136/neoforge-21.4.136-universal.jar
+    sudo -u ec2-user wget -v "https://maven.neoforged.net/releases/net/neoforged/forge/1.21.4-20241203.161809/neoforge-1.21.4-20241203.161809-universal.jar"
 
-    # Verify files were downloaded
-    if [ ! -f "neoforge-21.4.136-installer.jar" ]; then
-        echo "::error::Failed to download NeoForge installer"
+    # Verify download
+    if [ ! -f "neoforge-1.21.4-20241203.161809-universal.jar" ]; then
+        echo "Failed to download NeoForge universal JAR"
         exit 1
     fi
 
-    if [ ! -f "/opt/minecraft/server/libraries/net/neoforged/neoforge/21.4.136/neoforge-21.4.136-universal.jar" ]; then
-        echo "::error::Failed to download NeoForge universal JAR"
-        exit 1
-    fi
-
-    echo "Running NeoForge installer..."
-    # Run installer and capture both stdout and stderr
-    sudo -u ec2-user java -jar neoforge-21.4.136-installer.jar --installServer 2>&1 | tee /opt/minecraft/logs/neoforge-install.log
-
-    # Check installer exit status
-    INSTALL_STATUS=${PIPESTATUS[0]}
-    if [ $INSTALL_STATUS -ne 0 ]; then
-        # Check for the success message in the log
-        if grep -q "The server installed successfully" /opt/minecraft/logs/neoforge-install.log; then
-            echo "NeoForge installer exited with code $INSTALL_STATUS but reports success. Continuing."
-        else
-            echo "::error::NeoForge installer failed with exit code $INSTALL_STATUS"
-            echo "::error::Installation log (last 10 lines):"
-            tail -n 10 /opt/minecraft/logs/neoforge-install.log
-            exit 1
-        fi
-    fi
-
-    # List directory contents for debugging
-    echo "Contents of /opt/minecraft/server:"
-    ls -la /opt/minecraft/server
-
-    # Verify the installed JAR
-    if [ ! -f "$NEOFORGE_JAR" ]; then
-        echo "::error::Failed to install NeoForge. Server JAR not found at $NEOFORGE_JAR"
-        echo "::error::Installation log (last 10 lines):"
-        tail -n 10 /opt/minecraft/logs/neoforge-install.log
-        exit 1
-    fi
-
-    # Create a symlink to the server JAR
+    # Create symlink to server JAR
     echo "Creating symlink to server JAR..."
-    ln -sf "$NEOFORGE_JAR" "/opt/minecraft/server/neoforge-21.4.136.jar"
+    sudo ln -sf "neoforge-1.21.4-20241203.161809-universal.jar" "server.jar"
 
     # Verify symlink was created
-    if [ ! -L "/opt/minecraft/server/neoforge-21.4.136.jar" ]; then
-        echo "::error::Failed to create symlink to NeoForge server JAR"
+    if [ ! -L "server.jar" ]; then
+        echo "Failed to create symlink to NeoForge server JAR"
         exit 1
     fi
 
-    echo "✅ NeoForge installation verified"
+    echo "✅ NeoForge setup completed"
 
     # Clean up installer
-    sudo -u ec2-user rm -f neoforge-21.4.136-installer.jar
+    sudo -u ec2-user rm -f neoforge-1.21.4-20241203.161809-universal.jar
 fi
 
 # Accept EULA and create basic server configuration
