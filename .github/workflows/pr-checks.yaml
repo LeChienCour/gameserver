@@ -212,6 +212,7 @@ jobs:
           # Get the output and handle potential errors
           if ! OUTPUT=$(terraform output -json 2>&1); then
             echo "::error::Failed to get Terraform outputs"
+            echo "Terraform output error: $OUTPUT"
             exit 1
           fi
           
@@ -380,6 +381,14 @@ jobs:
           
           # Set correct permissions
           ssh -i ~/.ssh/game_server_key -o StrictHostKeyChecking=no ec2-user@$INSTANCE_IP "sudo chown ec2-user:ec2-user /opt/minecraft/mods/*.jar && sudo chmod 644 /opt/minecraft/mods/*.jar"
+
+      - name: Debug Instance IP
+        run: |
+          echo "Instance IP from Terraform: $INSTANCE_IP"
+          if [ -z "$INSTANCE_IP" ]; then
+            echo "::error::INSTANCE_IP is empty"
+            exit 1
+          fi
 
   deploy:
     needs: [build_mod]
