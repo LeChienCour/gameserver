@@ -184,8 +184,39 @@ cat << 'EOF' | sudo tee /opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-a
 EOF
 
 # Create CloudWatch log groups if they don't exist
+echo "Creating CloudWatch log groups..."
 aws logs create-log-group --log-group-name /minecraft/server-logs --region "$AWS_REGION" || true
 aws logs create-log-group --log-group-name /minecraft/voice-chat-logs --region "$AWS_REGION" || true
+
+# Create SSM parameters if they don't exist
+echo "Creating SSM parameters..."
+aws ssm put-parameter \
+    --name "/minecraft/websocket-url" \
+    --value "wss://7vy8tzmldf.execute-api.us-east-1.amazonaws.com/test" \
+    --type "SecureString" \
+    --region "$AWS_REGION" \
+    --overwrite || true
+
+aws ssm put-parameter \
+    --name "/minecraft/websocket-api-key" \
+    --value "m9iiSebJTW58OkyKtwJej1CxmUhmLbaVapAulxTg" \
+    --type "SecureString" \
+    --region "$AWS_REGION" \
+    --overwrite || true
+
+aws ssm put-parameter \
+    --name "/minecraft/user-pool-id" \
+    --value "us-east-1_OaKjZe6Ce" \
+    --type "SecureString" \
+    --region "$AWS_REGION" \
+    --overwrite || true
+
+aws ssm put-parameter \
+    --name "/minecraft/user-pool-client-id" \
+    --value "4f0iqtnsjiklmtat7k5ef8jaok" \
+    --type "SecureString" \
+    --region "$AWS_REGION" \
+    --overwrite || true
 
 # Start CloudWatch agent
 echo "Starting CloudWatch agent..."
