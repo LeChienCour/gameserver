@@ -79,8 +79,8 @@ echo "Installing NeoForge..."
 cd /opt/minecraft/server
 
 # Ensure proper permissions
-chown -R ec2-user:ec2-user /opt/minecraft/server
-chmod -R 755 /opt/minecraft/server
+sudo chown -R ec2-user:ec2-user /opt/minecraft/server
+sudo chmod -R 755 /opt/minecraft/server
 
 # Download NeoForge installer with verbose output
 echo "Downloading NeoForge installer..."
@@ -115,12 +115,17 @@ echo "Contents of /opt/minecraft/server:"
 ls -la /opt/minecraft/server
 
 # Verify the installed JAR
-if [ ! -f "neoforge-21.4.136.jar" ]; then
-    echo "::error::Failed to install NeoForge. Installer JAR not found."
+NEOFORGE_JAR="/opt/minecraft/server/libraries/net/neoforged/neoforge/21.4.136/neoforge-21.4.136-server.jar"
+if [ ! -f "$NEOFORGE_JAR" ]; then
+    echo "::error::Failed to install NeoForge. Server JAR not found at $NEOFORGE_JAR"
     echo "::error::Installation log (last 10 lines):"
     tail -n 10 /opt/minecraft/logs/neoforge-install.log
     exit 1
 fi
+
+# Create a symlink to the server JAR in the server directory
+echo "Creating symlink to server JAR..."
+ln -sf "$NEOFORGE_JAR" "/opt/minecraft/server/neoforge-21.4.136.jar"
 
 echo "✅ NeoForge installation verified"
 
