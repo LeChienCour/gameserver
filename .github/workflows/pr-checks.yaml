@@ -338,11 +338,9 @@ jobs:
       - name: Setup Instance
         if: matrix.task == 'instance-setup'
         run: |
-          # Create SSH key file with proper format
+          # Create SSH key file with proper format and encoding
           mkdir -p ~/.ssh
-          echo "-----BEGIN OPENSSH PRIVATE KEY-----" > ~/.ssh/game_server_key
-          echo "${{ secrets.SSH_PRIVATE_KEY }}" >> ~/.ssh/game_server_key
-          echo "-----END OPENSSH PRIVATE KEY-----" >> ~/.ssh/game_server_key
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" | base64 -d > ~/.ssh/game_server_key
           chmod 600 ~/.ssh/game_server_key
           
           # Debug: Check key format
@@ -377,11 +375,9 @@ jobs:
       - name: Copy Mod to Instance
         if: matrix.task == 'mod-build'
         run: |
-          # Create SSH key file with proper format
+          # Create SSH key file with proper format and encoding
           mkdir -p ~/.ssh
-          echo "-----BEGIN OPENSSH PRIVATE KEY-----" > ~/.ssh/game_server_key
-          echo "${{ secrets.SSH_PRIVATE_KEY }}" >> ~/.ssh/game_server_key
-          echo "-----END OPENSSH PRIVATE KEY-----" >> ~/.ssh/game_server_key
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" | base64 -d > ~/.ssh/game_server_key
           chmod 600 ~/.ssh/game_server_key
           
           # Debug: Check key format
