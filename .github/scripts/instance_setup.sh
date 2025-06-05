@@ -76,7 +76,11 @@ sudo chmod -R 755 /opt/minecraft
 
 # Install NeoForge
 echo "Installing NeoForge..."
-sudo -u ec2-user cd /opt/minecraft/server
+cd /opt/minecraft/server
+
+# Ensure proper permissions
+chown -R ec2-user:ec2-user /opt/minecraft/server
+chmod -R 755 /opt/minecraft/server
 
 # Download NeoForge installer with verbose output
 echo "Downloading NeoForge installer..."
@@ -100,17 +104,21 @@ if [ $INSTALL_STATUS -ne 0 ]; then
         echo "NeoForge installer exited with code $INSTALL_STATUS but reports success. Continuing."
     else
         echo "::error::NeoForge installer failed with exit code $INSTALL_STATUS"
-        echo "::error::Installation log:"
-        cat /opt/minecraft/logs/neoforge-install.log
+        echo "::error::Installation log (last 10 lines):"
+        tail -n 10 /opt/minecraft/logs/neoforge-install.log
         exit 1
     fi
 fi
 
+# List directory contents for debugging
+echo "Contents of /opt/minecraft/server:"
+ls -la /opt/minecraft/server
+
 # Verify the installed JAR
 if [ ! -f "neoforge-21.4.136.jar" ]; then
     echo "::error::Failed to install NeoForge. Installer JAR not found."
-    echo "::error::Installation log:"
-    cat /opt/minecraft/logs/neoforge-install.log
+    echo "::error::Installation log (last 10 lines):"
+    tail -n 10 /opt/minecraft/logs/neoforge-install.log
     exit 1
 fi
 
