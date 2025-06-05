@@ -382,6 +382,56 @@ jobs:
           # Set correct permissions
           ssh -i ~/.ssh/game_server_key -o StrictHostKeyChecking=no ec2-user@$INSTANCE_IP "sudo chown ec2-user:ec2-user /opt/minecraft/mods/*.jar && sudo chmod 644 /opt/minecraft/mods/*.jar"
 
+          # Get WebSocket and Cognito configuration from SSM
+          WEBSOCKET_URL=$(aws ssm get-parameter --name "/minecraft/websocket-url" --with-decryption --query "Parameter.Value" --output text)
+          WEBSOCKET_API_KEY=$(aws ssm get-parameter --name "/minecraft/websocket-api-key" --with-decryption --query "Parameter.Value" --output text)
+          USER_POOL_ID=$(aws ssm get-parameter --name "/minecraft/user-pool-id" --with-decryption --query "Parameter.Value" --output text)
+          USER_POOL_CLIENT_ID=$(aws ssm get-parameter --name "/minecraft/user-pool-client-id" --with-decryption --query "Parameter.Value" --output text)
+
+          # Create config directory if it doesn't exist
+          ssh -i ~/.ssh/game_server_key -o StrictHostKeyChecking=no ec2-user@$INSTANCE_IP "sudo mkdir -p /opt/minecraft/runs/client/config"
+
+          # Create VoiceChatMod configuration
+          ssh -i ~/.ssh/game_server_key -o StrictHostKeyChecking=no ec2-user@$INSTANCE_IP "cat > /opt/minecraft/runs/client/config/voicechatmod-common.toml << 'EOF'
+          #Enable or disable the voice chat functionality globally.
+          enableVoiceChat = true
+          #Default voice chat volume (0.0 to 1.0). This might be overridden by client-side settings later.
+          # Default: 0.7
+          # Range: 0.0 ~ 1.0
+          defaultVolume = 0.7
+          #Maximum distance (in blocks) at which players can hear each other. Set to 0 for global chat (if server supports).
+          # Default: 64
+          # Range: 0 ~ 256
+          maxVoiceDistance = 64
+          #Number of times to attempt reconnection to the voice gateway if connection is lost.
+          # Default: 3
+          # Range: 0 ~ 10
+          reconnectionAttempts = 3
+          #Delay in seconds between reconnection attempts.
+          # Default: 5
+          # Range: 1 ~ 30
+          reconnectionDelay = 5
+          #WebSocket Gateway URL for voice chat communication
+          websocketStageUrl = \"$WEBSOCKET_URL\"
+          #API Key for WebSocket Gateway authentication
+          websocketApiKey = \"$WEBSOCKET_API_KEY\"
+          #Cognito User Pool ID for authentication
+          userPoolId = \"$USER_POOL_ID\"
+          #Cognito User Pool Client ID for authentication
+          userPoolClientId = \"$USER_POOL_CLIENT_ID\"
+          #The name of the selected microphone device. Leave empty to use system default.
+          selectedMicrophone = \"\"
+          #Whether to use the system default microphone instead of a specific device.
+          useSystemDefaultMic = true
+          #Microphone boost/gain level (1.0 is normal, increase for quiet mics).
+          # Default: 1.0
+          # Range: 0.1 ~ 5.0
+          microphoneBoost = 1.0
+          EOF"
+
+          # Set correct permissions for the config file and directory
+          ssh -i ~/.ssh/game_server_key -o StrictHostKeyChecking=no ec2-user@$INSTANCE_IP "sudo chown -R ec2-user:ec2-user /opt/minecraft/runs && sudo chmod 644 /opt/minecraft/runs/client/config/voicechatmod-common.toml"
+
       - name: Debug Instance IP
         run: |
           echo "Instance IP from Terraform: $INSTANCE_IP"
@@ -408,39 +458,15 @@ jobs:
       # Get repository code
       - uses: actions/checkout@v4.1.1
 
-      # Download built mod
-      - name: Download built mod
-        uses: actions/download-artifact@v4
+      - name: Deploy to EC2
+        uses: appleboy/ssh-action@master
         with:
-          name: minecraft-mod
-          path: mod_source/build/libs
-
-      # Verify mod file
-      - name: Verify mod file
-        run: |
-          echo "Checking mod files in build/libs:"
-          ls -la mod_source/build/libs/
-          if [ ! -f mod_source/build/libs/*.jar ]; then
-            echo "::error::No mod JAR file found after download"
-            exit 1
-          fi
-
-      # Deploy mod and configure server
-      - name: Deploy Mod
-        id: deploy
-        env:
-          INSTANCE_IP: ${{ needs.terraform_deploy.outputs.instance_ip }}
-          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-        run: |
-          # Make deployment script executable
-          chmod +x .github/scripts/deploy.sh
-          
-          # Export stage name for the script
-          export STAGE="pr-${PR_NUMBER}"
-          
-          # Run deployment script
-          .github/scripts/deploy.sh
+          host: ${{ needs.terraform_deploy.outputs.instance_ip }}
+          username: ec2-user
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            # Restart the Minecraft server to ensure mod is loaded
+            sudo systemctl restart minecraft
 
       # Update PR with deployment results
       - name: Update PR with Deployment Results
