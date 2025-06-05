@@ -18,8 +18,18 @@ on:
       - '.github/workflows/pr-checks.yaml'  # This workflow
       - 'terraform/**'            # Infrastructure code
       - 'userdata.sh'            # Instance initialization
-  # Allow manual triggers for testing
+  # Allow manual triggers with stage selection
   workflow_dispatch:
+    inputs:
+      stage:
+        description: 'Deployment stage (dev/qa/prod)'
+        required: true
+        default: 'dev'
+        type: choice
+        options:
+          - dev
+          - qa
+          - prod
 
 # Global minimum permissions
 permissions: read-all
@@ -51,6 +61,7 @@ jobs:
         with:
           terraform_version: 1.12.1
 
+      # Verify all required secrets are available
       - name: Validate Required Secrets
         env:
           TF_STATE_BUCKET: ${{ secrets.TF_STATE_BUCKET }}
@@ -81,19 +92,25 @@ jobs:
           fi
           echo "All required secrets are set"
 
-      - name: Configure PR Test Environment
-        id: config
+      - name: Determine Stage
+        id: stage
         run: |
-          PR_NUMBER=$(echo $GITHUB_REF | cut -d'/' -f3)
-          STAGE="pr-${PR_NUMBER}"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            STAGE="${{ github.event.inputs.stage }}"
+          elif [ "${{ github.event_name }}" = "pull_request" ]; then
+            PR_NUMBER=$(echo $GITHUB_REF | cut -d'/' -f3)
+            STAGE="pr-${PR_NUMBER}"
+          else
+            STAGE="dev"  # Default to dev for main branch
+          fi
           echo "stage=$STAGE" >> $GITHUB_OUTPUT
-          echo "workspace=pr-${PR_NUMBER}" >> $GITHUB_OUTPUT  # Keep workspace for backward compatibility
+          echo "Deploying to stage: $STAGE"
 
       - name: Create Backend Config File
         env:
           TF_STATE_BUCKET: ${{ secrets.TF_STATE_BUCKET }}
           TF_LOCK_TABLE: ${{ secrets.TF_LOCK_TABLE }}
-          STAGE: ${{ steps.config.outputs.stage }}
+          STAGE: ${{ steps.stage.outputs.stage }}
         run: |
           cat > backend.hcl << EOF
           bucket         = "$TF_STATE_BUCKET"
@@ -168,14 +185,13 @@ jobs:
       - name: Terraform Plan
         id: plan
         env:
-          TF_WORKSPACE: ${{ steps.config.outputs.workspace }}  # Keep for backward compatibility
-          TF_VAR_stage: ${{ steps.config.outputs.stage }}
+          TF_VAR_stage: ${{ steps.stage.outputs.stage }}
         run: |
           # Set logging to show only errors
           export TF_LOG=ERROR
           
           echo "Running Terraform plan..."
-          terraform plan -var="stage=${{ steps.config.outputs.stage }}" -no-color -detailed-exitcode -input=false -out=tfplan 2>&1 | tee plan.log
+          terraform plan -var="stage=${{ steps.stage.outputs.stage }}" -no-color -detailed-exitcode -input=false -out=tfplan 2>&1 | tee plan.log
           PLAN_EXIT_CODE=${PIPESTATUS[0]}
           
           # Check plan exit code
@@ -198,12 +214,10 @@ jobs:
             echo "✅ Terraform plan shows no changes needed"
           fi
 
-      - name: Test Infrastructure Deployment
+      - name: Apply Infrastructure Changes
         id: apply
-        if: github.event_name == 'pull_request' && steps.plan.outcome == 'success'
         env:
-          TF_WORKSPACE: ${{ steps.config.outputs.workspace }}  # Keep for backward compatibility
-          TF_VAR_stage: ${{ steps.config.outputs.stage }}
+          TF_VAR_stage: ${{ steps.stage.outputs.stage }}
         run: |
           # Set logging to show only errors
           export TF_LOG=ERROR
@@ -602,11 +616,11 @@ jobs:
 
       - name: Destroy Infrastructure
         env:
-          TF_WORKSPACE: ${{ steps.config.outputs.workspace }}  # Keep for backward compatibility
-          TF_VAR_stage: ${{ steps.config.outputs.stage }}
+          TF_WORKSPACE: ${{ steps.stage.outputs.workspace }}  # Keep for backward compatibility
+          TF_VAR_stage: ${{ steps.stage.outputs.stage }}
         run: |
           echo "🧹 Cleaning up infrastructure..."
-          terraform destroy -auto-approve -var="stage=${{ steps.config.outputs.stage }}"
+          terraform destroy -auto-approve -var="stage=${{ steps.stage.outputs.stage }}"
           echo "✅ Cleanup completed"
 
       - name: Delete Workspace
