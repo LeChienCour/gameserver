@@ -338,9 +338,11 @@ jobs:
       - name: Setup Instance
         if: matrix.task == 'instance-setup'
         run: |
-          # Create SSH key file
+          # Create SSH key file with proper format
           mkdir -p ~/.ssh
-          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/game_server_key
+          echo "-----BEGIN OPENSSH PRIVATE KEY-----" > ~/.ssh/game_server_key
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" >> ~/.ssh/game_server_key
+          echo "-----END OPENSSH PRIVATE KEY-----" >> ~/.ssh/game_server_key
           chmod 600 ~/.ssh/game_server_key
           
           # Get instance IP from Terraform output
@@ -359,9 +361,11 @@ jobs:
       - name: Copy Mod to Instance
         if: matrix.task == 'mod-build'
         run: |
-          # Create SSH key file
+          # Create SSH key file with proper format
           mkdir -p ~/.ssh
-          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/game_server_key
+          echo "-----BEGIN OPENSSH PRIVATE KEY-----" > ~/.ssh/game_server_key
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" >> ~/.ssh/game_server_key
+          echo "-----END OPENSSH PRIVATE KEY-----" >> ~/.ssh/game_server_key
           chmod 600 ~/.ssh/game_server_key
           
           # Get instance IP from Terraform output
