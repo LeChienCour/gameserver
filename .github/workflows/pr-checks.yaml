@@ -280,7 +280,10 @@ jobs:
       - name: Verify AWS Access
         run: |
           echo "Verifying AWS credentials..."
-          aws sts get-caller-identity
+          if ! aws sts get-caller-identity; then
+            echo "::error::Failed to verify AWS credentials"
+            exit 1
+          fi
           
           echo "Testing SSM parameter access..."
           # Test access to required SSM parameters

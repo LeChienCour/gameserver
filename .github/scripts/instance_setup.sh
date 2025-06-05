@@ -33,41 +33,40 @@ is_corretto() {
     java -version 2>&1 | grep -q "Corretto"
 }
 
+# Update package lists and install required packages
+sudo apt update
+sudo apt install -y wget gnupg
+
 # Check and update Java if needed
 if command_exists java; then
     CURRENT_JAVA_VERSION=$(get_java_version)
     echo "Current Java version: $CURRENT_JAVA_VERSION"
-    
-    if [ "$CURRENT_JAVA_VERSION" != "21" ] || ! is_corretto; then
-        echo "Updating Java to Amazon Corretto 21 (headless)..."
-        # Remove existing Java installation
-        sudo apt remove -y openjdk-*
-        # Add Amazon Corretto repository
-        wget -O- https://apt.corretto.aws/corretto.key | sudo apt-key add -
-        sudo add-apt-repository 'deb https://apt.corretto.aws stable main'
-        sudo apt update
-        # Install headless variant
-        sudo apt install -y java-21-amazon-corretto-headless
-        
-        # Verify new Java installation
-        NEW_JAVA_VERSION=$(get_java_version)
-        echo "New Java version: $NEW_JAVA_VERSION"
-        
-        if [ "$NEW_JAVA_VERSION" != "21" ] || ! is_corretto; then
-            echo "::error::Failed to install Amazon Corretto 21. Current version: $NEW_JAVA_VERSION"
-            exit 1
-        fi
-    else
-        echo "Amazon Corretto 21 is already installed"
-    fi
-else
+fi
+
+if ! command_exists java || [ "$CURRENT_JAVA_VERSION" != "21" ] || ! is_corretto; then
     echo "Installing Amazon Corretto 21 (headless)..."
+    # Remove existing Java installation if present
+    if command_exists java; then
+        sudo apt remove -y openjdk-*
+    fi
+    
     # Add Amazon Corretto repository
-    wget -O- https://apt.corretto.aws/corretto.key | sudo apt-key add -
-    sudo add-apt-repository 'deb https://apt.corretto.aws stable main'
+    wget -O- https://apt.corretto.aws/corretto.key | sudo gpg --dearmor -o /usr/share/keyrings/corretto.gpg
+    echo "deb [signed-by=/usr/share/keyrings/corretto.gpg] https://apt.corretto.aws stable main" | sudo tee /etc/apt/sources.list.d/corretto.list
     sudo apt update
+    
     # Install headless variant
     sudo apt install -y java-21-amazon-corretto-headless
+    
+    # Verify installation
+    NEW_JAVA_VERSION=$(get_java_version)
+    if [ "$NEW_JAVA_VERSION" != "21" ] || ! is_corretto; then
+        echo "::error::Failed to install Amazon Corretto 21. Current version: $NEW_JAVA_VERSION"
+        exit 1
+    fi
+    echo "✅ Amazon Corretto 21 installed successfully"
+else
+    echo "✅ Amazon Corretto 21 is already installed"
 fi
 
 # Check if Git is installed
