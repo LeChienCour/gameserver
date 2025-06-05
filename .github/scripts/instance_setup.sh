@@ -96,14 +96,15 @@ if [ "$INSTALLER_SIZE" -lt 1000000 ]; then
 fi
 
 echo "Running NeoForge installer..."
-# Run installer with verbose output and capture both stdout and stderr
-sudo -u ec2-user java -jar neoforge-21.4.136-installer.jar --installServer --verbose 2>&1 | tee /opt/minecraft/logs/neoforge-install.log
+# Run installer and capture both stdout and stderr
+sudo -u ec2-user java -jar neoforge-21.4.136-installer.jar --installServer 2>&1 | tee /opt/minecraft/logs/neoforge-install.log
 
 # Check installer exit status
 INSTALL_STATUS=${PIPESTATUS[0]}
 if [ $INSTALL_STATUS -ne 0 ]; then
     echo "::error::NeoForge installer failed with exit code $INSTALL_STATUS"
-    echo "::error::Check /opt/minecraft/logs/neoforge-install.log for details"
+    echo "::error::Installation log:"
+    cat /opt/minecraft/logs/neoforge-install.log
     exit 1
 fi
 
