@@ -345,6 +345,18 @@ jobs:
           echo "-----END OPENSSH PRIVATE KEY-----" >> ~/.ssh/game_server_key
           chmod 600 ~/.ssh/game_server_key
           
+          # Debug: Check key format
+          echo "Checking SSH key format..."
+          ssh-keygen -l -f ~/.ssh/game_server_key || echo "::error::Invalid key format"
+          
+          # Debug: Show key type
+          echo "Key type:"
+          file ~/.ssh/game_server_key
+          
+          # Debug: Show key permissions
+          echo "Key permissions:"
+          ls -l ~/.ssh/game_server_key
+          
           # Get instance IP from Terraform output
           INSTANCE_IP=${{ needs.terraform_deploy.outputs.instance_ip }}
           if [ -z "$INSTANCE_IP" ]; then
@@ -352,8 +364,12 @@ jobs:
             exit 1
           fi
           
+          # Debug: Test SSH connection with verbose output
+          echo "Testing SSH connection..."
+          ssh -v -i ~/.ssh/game_server_key -o StrictHostKeyChecking=no ec2-user@$INSTANCE_IP "echo 'SSH connection successful'" || echo "::error::SSH connection failed"
+          
           # Copy setup script to instance
-          scp -i ~/.ssh/game_server_key -o StrictHostKeyChecking=no .github/scripts/instance_setup.sh ec2-user@$INSTANCE_IP:~/setup.sh
+          scp -v -i ~/.ssh/game_server_key -o StrictHostKeyChecking=no .github/scripts/instance_setup.sh ec2-user@$INSTANCE_IP:~/setup.sh
           
           # Execute setup script on instance with AWS credentials
           ssh -i ~/.ssh/game_server_key -o StrictHostKeyChecking=no ec2-user@$INSTANCE_IP "chmod +x ~/setup.sh && sudo AWS_ACCESS_KEY_ID=${{ secrets.AWS_ACCESS_KEY_ID }} AWS_SECRET_ACCESS_KEY=${{ secrets.AWS_SECRET_ACCESS_KEY }} AWS_REGION=${{ env.AWS_REGION }} ~/setup.sh"
@@ -368,6 +384,18 @@ jobs:
           echo "-----END OPENSSH PRIVATE KEY-----" >> ~/.ssh/game_server_key
           chmod 600 ~/.ssh/game_server_key
           
+          # Debug: Check key format
+          echo "Checking SSH key format..."
+          ssh-keygen -l -f ~/.ssh/game_server_key || echo "::error::Invalid key format"
+          
+          # Debug: Show key type
+          echo "Key type:"
+          file ~/.ssh/game_server_key
+          
+          # Debug: Show key permissions
+          echo "Key permissions:"
+          ls -l ~/.ssh/game_server_key
+          
           # Get instance IP from Terraform output
           INSTANCE_IP=${{ needs.terraform_deploy.outputs.instance_ip }}
           if [ -z "$INSTANCE_IP" ]; then
@@ -375,8 +403,12 @@ jobs:
             exit 1
           fi
           
+          # Debug: Test SSH connection with verbose output
+          echo "Testing SSH connection..."
+          ssh -v -i ~/.ssh/game_server_key -o StrictHostKeyChecking=no ec2-user@$INSTANCE_IP "echo 'SSH connection successful'" || echo "::error::SSH connection failed"
+          
           # Copy the built mod to the instance
-          scp -i ~/.ssh/game_server_key -o StrictHostKeyChecking=no VoiceChatMod/build/libs/*.jar ec2-user@$INSTANCE_IP:/opt/minecraft/mods/
+          scp -v -i ~/.ssh/game_server_key -o StrictHostKeyChecking=no VoiceChatMod/build/libs/*.jar ec2-user@$INSTANCE_IP:/opt/minecraft/mods/
           
           # Set correct permissions
           ssh -i ~/.ssh/game_server_key -o StrictHostKeyChecking=no ec2-user@$INSTANCE_IP "sudo chown ec2-user:ec2-user /opt/minecraft/mods/*.jar && sudo chmod 644 /opt/minecraft/mods/*.jar"
