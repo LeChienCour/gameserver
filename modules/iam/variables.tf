@@ -8,11 +8,6 @@ variable "audio_bucket_name" {
   type        = string
 }
 
-variable "kms_key_arn" {
-  description = "ARN of the KMS key for encryption"
-  type        = string
-}
-
 variable "event_bus_arn" {
   description = "ARN of the EventBridge event bus"
   type        = string

@@ -85,34 +85,15 @@ resource "aws_iam_instance_profile" "game_server_profile" {
 
 # Load user data script
 data "template_file" "user_data" {
-  template = file("${path.module}/userdata.sh")
+  template = file("${path.module}/templates/user_data.sh")
 
   vars = {
-    minecraft_version = var.minecraft_version
-    neoforge_version  = var.neoforge_version
-    server_memory     = var.server_memory
-    java_parameters   = var.java_parameters
-    LOG_DIR           = "/opt/minecraft/logs"
-    LATEST_LOG        = "/opt/minecraft/logs/latest.log"
-    DEBUG_LOG         = "/opt/minecraft/logs/debug.log"
-    ERROR_LOG         = "/opt/minecraft/logs/errors.log"
-  }
-}
-
-# Generate SSH key pair
-resource "tls_private_key" "ssh_key" {
-  algorithm = "RSA"
-  rsa_bits  = 4096
-}
-
-# Create AWS key pair
-resource "aws_key_pair" "generated_key" {
-  key_name   = "minecraft-server-key-${var.stage}"
-  public_key = tls_private_key.ssh_key.public_key_openssh
-
-  tags = {
-    Name  = "minecraft-server-key-${var.stage}"
-    Stage = var.stage
+    game_port           = var.game_port
+    websocket_port      = var.websocket_port
+    user_pool_id        = var.user_pool_id
+    user_pool_client_id = var.user_pool_client_id
+    stage               = var.stage
+    environment         = var.environment
   }
 }
 
@@ -120,26 +101,23 @@ resource "aws_key_pair" "generated_key" {
 resource "aws_instance" "game_server" {
   ami           = var.ami_id
   instance_type = var.instance_type
-  subnet_id     = var.subnet_id
-  key_name      = aws_key_pair.generated_key.key_name
 
-  vpc_security_group_ids = [var.security_group_id]
-  iam_instance_profile   = aws_iam_instance_profile.game_server_profile.name
+  subnet_id                   = var.subnet_id
+  vpc_security_group_ids      = [var.security_group_id]
+  associate_public_ip_address = true
+  key_name                    = var.key_name
 
-  user_data                   = data.template_file.user_data.rendered
-  user_data_replace_on_change = true
+  user_data = data.template_file.user_data.rendered
 
   root_block_device {
-    volume_size = var.root_volume_size
+    volume_size = 30
     volume_type = "gp3"
-    encrypted   = true
   }
 
   tags = {
-    Name        = "minecraft-neoforge-server-${var.stage}"
+    Name        = "game-server-${var.stage}"
     Environment = var.environment
     Stage       = var.stage
-    Managed_by  = "terraform"
   }
 }
 

@@ -559,8 +559,8 @@ This project is licensed under the MIT License - see the LICENSE file for detail
    - [x] Test broadcasting to multiple listeners
    - [x] Validate WebSocket context preservation
    - [x] Verify client message reception
-   - [ ] Test client audio playback
-   - [ ] Verify audio format and quality in client
+   - [x] Test client audio playback
+   - [x] Verify audio format and quality in client
    - [x] Monitor end-to-end latency
 
 2. **Testing Scenarios**
@@ -831,3 +831,168 @@ This project is licensed under the MIT License - see the LICENSE file for detail
    - Automated world backups to S3
    - State file versioning
    - Regular infrastructure validation
+
+# Minecraft Game Server
+
+This repository contains the infrastructure and deployment code for a Minecraft game server with voice chat capabilities.
+
+## CI/CD Pipeline
+
+The project uses GitHub Actions for continuous integration and deployment. The pipeline is defined in `.github/workflows/pr-checks.yaml` and handles both pull request testing and production deployments.
+
+### Pipeline Overview
+
+The pipeline consists of four main jobs:
+
+1. **Terraform Deploy** (`terraform_deploy`)
+   - Deploys infrastructure using Terraform
+   - Creates/updates EC2 instance and related AWS resources
+   - Outputs the instance IP for subsequent jobs
+
+2. **Build Mod** (`build_mod`)
+   - Builds the VoiceChatMod from source
+   - Deploys the mod to the server
+   - Configures server settings
+
+3. **Deploy** (`deploy`)
+   - Restarts the Minecraft server
+   - Verifies deployment success
+   - Collects and reports server logs
+
+4. **Cleanup Infrastructure** (`cleanup_infrastructure`)
+   - Only runs for PR events
+   - Cleans up temporary infrastructure when PR is closed
+   - Does not run for main branch deployments
+
+### Pipeline Triggers
+
+The pipeline is triggered in the following scenarios:
+
+1. **Pull Requests**
+   - On PR open
+   - On PR updates
+   - On PR reopen
+   - Creates temporary infrastructure for testing
+   - Cleans up after PR is closed
+
+2. **Main Branch**
+   - On push to main
+   - Only triggers on changes to:
+     - `.github/scripts/**`
+     - `.github/workflows/pr-checks.yaml`
+     - `terraform/**`
+     - `userdata.sh`
+   - Deploys to production
+   - Keeps infrastructure running
+
+3. **Manual Trigger**
+   - Can be triggered manually via workflow_dispatch
+   - Useful for testing or manual deployments
+
+### Required Secrets
+
+The pipeline requires the following secrets to be configured in the repository:
+
+- `AWS_ACCESS_KEY_ID`: AWS access key for infrastructure deployment
+- `AWS_SECRET_ACCESS_KEY`: AWS secret key for infrastructure deployment
+- `TF_STATE_BUCKET`: S3 bucket for Terraform state
+- `TF_LOCK_TABLE`: DynamoDB table for Terraform state locking
+- `SSH_PRIVATE_KEY`: SSH key for server access
+- `GITHUB_TOKEN`: Automatically provided by GitHub
+
+### Infrastructure
+
+The infrastructure is managed using Terraform and includes:
+
+- EC2 instance for the Minecraft server
+- Security groups and networking
+- IAM roles and policies
+- SSM parameters for configuration
+
+### Deployment Process
+
+1. **Infrastructure Deployment**
+   - Terraform initializes with backend configuration
+   - Plans and applies infrastructure changes
+   - Outputs instance IP for next steps
+
+2. **Mod Deployment**
+   - Clones and builds VoiceChatMod
+   - Deploys mod to server
+   - Configures mod settings
+
+3. **Server Configuration**
+   - Sets up server environment
+   - Configures mod settings
+   - Restarts server to apply changes
+
+### Monitoring and Logs
+
+The pipeline provides detailed logs and status updates:
+
+- Terraform plan and apply logs
+- Server startup logs
+- Error logs if deployment fails
+- PR comments with deployment status
+
+### Best Practices
+
+1. **Security**
+   - Minimal required permissions
+   - Secure secret management
+   - Infrastructure as Code
+
+2. **Reliability**
+   - Comprehensive error handling
+   - Detailed logging
+   - State management
+
+3. **Maintainability**
+   - Modular job structure
+   - Clear documentation
+   - Consistent naming
+
+## Development
+
+### Local Development
+
+1. Install required tools:
+   - Terraform
+   - AWS CLI
+   - SSH client
+
+2. Configure AWS credentials:
+   ```bash
+   aws configure
+   ```
+
+3. Initialize Terraform:
+   ```bash
+   terraform init
+   ```
+
+### Testing
+
+1. Create a new branch
+2. Make changes
+3. Create a PR
+4. Pipeline will automatically test changes
+
+### Deployment
+
+1. Merge to main branch
+2. Pipeline will automatically deploy to production
+3. Monitor deployment in GitHub Actions
+
+## Contributing
+
+1. Fork the repository
+2. Create a feature branch
+3. Make changes
+4. Create a pull request
+5. Wait for CI checks to pass
+6. Request review
+
+## License
+
+[Add your license information here]

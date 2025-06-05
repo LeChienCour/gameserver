@@ -22,6 +22,11 @@ provider "aws" {
 # Data Sources
 data "aws_caller_identity" "current" {}
 
+# Get key pair name from SSM parameter
+data "aws_ssm_parameter" "key_pair" {
+  name = "/gameserver/ec2/key_pair"
+}
+
 # Find latest Amazon Linux 2 AMI
 data "aws_ami" "amazon_linux_2" {
   most_recent = true
@@ -51,12 +56,6 @@ module "api_gateway" {
   lambda_connect_arn    = module.lambda.lambda_functions["connect"]
   lambda_disconnect_arn = module.lambda.lambda_functions["disconnect"]
   lambda_message_arn    = module.lambda.lambda_functions["message"]
-
-  # VPC Endpoint Configuration
-  vpc_endpoint_id = module.vpc.vpc_endpoint_execute_api_id
-  vpc_id          = module.vpc.vpc_id
-  security_groups = [module.vpc.vpc_endpoints_security_group_id]
-  subnet_ids      = module.vpc.public_subnets_ids
 
   depends_on = [
     module.vpc
@@ -101,6 +100,7 @@ module "ec2_game_server" {
   websocket_port      = var.websocket_port
   user_pool_id        = module.cognito.user_pool_id
   user_pool_client_id = module.cognito.user_pool_client_id
+  key_name            = data.aws_ssm_parameter.key_pair.value
   stage               = var.stage
   environment         = var.environment
 }
@@ -126,7 +126,6 @@ module "iam" {
 
   prefix            = "${var.prefix}-${var.stage}"
   audio_bucket_name = aws_s3_bucket.audio_storage.id
-  kms_key_arn       = module.kms.key_arn
   event_bus_arn     = module.eventbridge.event_bus_arn
   connections_table = var.connections_table
   environment       = var.environment
@@ -135,16 +134,6 @@ module "iam" {
   depends_on = [
     aws_s3_bucket.audio_storage
   ]
-}
-
-# KMS Module
-module "kms" {
-  source = "./modules/kms"
-
-  prefix       = "${var.prefix}-${var.stage}"
-  environment  = var.environment
-  stage        = var.stage
-  project_name = var.project_name
 }
 
 # Lambda Module
@@ -205,17 +194,16 @@ data "archive_file" "validate_audio_function" {
 
 # Security Groups Module
 module "security_groups" {
-  source                          = "./modules/security_groups"
-  vpc_id                          = module.vpc.vpc_id
-  game_port                       = var.game_port
-  websocket_port                  = var.websocket_port
-  ssh_cidr                        = var.ssh_cidr
-  security_group_name             = var.security_group_name
-  allowed_game_ips                = ["0.0.0.0/0"]
-  game_protocol                   = var.game_protocol
-  vpc_endpoints_security_group_id = module.vpc.vpc_endpoints_security_group_id
-  stage                           = var.stage
-  environment                     = var.environment
+  source              = "./modules/security_groups"
+  vpc_id              = module.vpc.vpc_id
+  game_port           = var.game_port
+  websocket_port      = var.websocket_port
+  ssh_cidr            = var.ssh_cidr
+  security_group_name = var.security_group_name
+  allowed_game_ips    = ["0.0.0.0/0"]
+  game_protocol       = var.game_protocol
+  stage               = var.stage
+  environment         = var.environment
 }
 
 # Storage Resources
@@ -237,14 +225,13 @@ resource "aws_s3_bucket_versioning" "audio_storage" {
   }
 }
 
-# Enable server-side encryption for the S3 bucket
+# Enable server-side encryption for the S3 bucket using AWS managed keys
 resource "aws_s3_bucket_server_side_encryption_configuration" "audio_storage" {
   bucket = aws_s3_bucket.audio_storage.id
 
   rule {
     apply_server_side_encryption_by_default {
-      kms_master_key_id = module.kms.key_arn
-      sse_algorithm     = "aws:kms"
+      sse_algorithm = "AES256"
     }
   }
 }
@@ -279,5 +266,4 @@ module "ssm" {
   websocket_api_id    = module.api_gateway.api_id
   websocket_stage_url = module.api_gateway.api_endpoint
   websocket_api_key   = module.api_gateway.api_key
-  ssh_private_key     = module.ec2_game_server.ssh_private_key
 }

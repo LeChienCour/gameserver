@@ -52,6 +52,11 @@ variable "stage" {
   type        = string
 }
 
+variable "key_name" {
+  description = "Name of the AWS key pair to use for SSH access"
+  type        = string
+}
+
 variable "minecraft_version" {
   description = "Version of Minecraft to install"
   type        = string

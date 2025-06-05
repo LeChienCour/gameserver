@@ -1,18 +1,31 @@
+# This workflow handles both PR checks and production deployments
+# For PRs: Creates temporary infrastructure for testing and cleans up after
+# For main branch: Deploys to production and keeps infrastructure running
 name: Pull Request Checks
 
 on:
+  # Trigger on PR events for testing
   pull_request:
     branches:
       - main
     types: [opened, synchronize, reopened]
-    # Prevent running on merge commits
-    paths-ignore:
-      - '.github/workflows/deploy-game-server.yaml'
+  # Trigger on main branch pushes for production deployment
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/scripts/**'      # Deployment scripts
+      - '.github/workflows/pr-checks.yaml'  # This workflow
+      - 'terraform/**'            # Infrastructure code
+      - 'userdata.sh'            # Instance initialization
+  # Allow manual triggers for testing
+  workflow_dispatch:
 
 # Global minimum permissions
 permissions: read-all
 
 jobs:
+  # First job: Deploy infrastructure using Terraform
   terraform_deploy:
     runs-on: ubuntu-latest
     permissions:
@@ -29,7 +42,9 @@ jobs:
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: us-east-1
+          aws-region: ${{ secrets.AWS_REGION }}
+        env:
+          AWS_REGION: ${{ secrets.AWS_REGION }}
 
       - name: Set up Terraform
         uses: hashicorp/setup-terraform@v3.0.0
@@ -42,6 +57,7 @@ jobs:
           TF_LOCK_TABLE: ${{ secrets.TF_LOCK_TABLE }}
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
         run: |
           if [ -z "$TF_STATE_BUCKET" ]; then
             echo "::error::TF_STATE_BUCKET secret is not set"
@@ -57,6 +73,10 @@ jobs:
           fi
           if [ -z "$AWS_SECRET_ACCESS_KEY" ]; then
             echo "::error::AWS_SECRET_ACCESS_KEY secret is not set"
+            exit 1
+          fi
+          if [ -z "$SSH_PRIVATE_KEY" ]; then
+            echo "::error::SSH_PRIVATE_KEY secret is not set"
             exit 1
           fi
           echo "All required secrets are set"
@@ -207,6 +227,7 @@ jobs:
           # Get the output and handle potential errors
           if ! OUTPUT=$(terraform output -json 2>&1); then
             echo "::error::Failed to get Terraform outputs"
+            echo "Terraform output error: $OUTPUT"
             exit 1
           fi
           
@@ -256,22 +277,198 @@ jobs:
         if: steps.plan.outcome == 'failure'
         run: exit 1
 
-  deploy_mod:
+  # Second job: Build and deploy the Minecraft mod
+  build_mod:
     needs: [terraform_deploy]
     runs-on: ubuntu-latest
     permissions:
-      contents: read        # For checkout
-      pull-requests: write  # For commenting results
+      contents: read
+      pull-requests: write
       id-token: write      # For AWS authentication
-      checks: write        # For test results
+    outputs:
+      instance_ip: ${{ env.INSTANCE_IP }}
+    strategy:
+      matrix:
+        task: [instance-setup, mod-build]
+    env:
+      INSTANCE_IP: ${{ needs.terraform_deploy.outputs.instance_ip }}
     steps:
-      - name: Configure PR Test Workspace
-        id: workspace
+      - uses: actions/checkout@v4
+      
+      - name: Set up AWS CLI
+        uses: aws-actions/configure-aws-credentials@v4.0.2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+        env:
+          AWS_REGION: ${{ secrets.AWS_REGION }}
+      
+      - name: Set up JDK 21
+        if: matrix.task == 'mod-build'
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+          
+      - name: Clone and Build VoiceChatMod
+        if: matrix.task == 'mod-build'
         run: |
-          PR_NUMBER=$(echo $GITHUB_REF | cut -d'/' -f3)
-          WORKSPACE="pr-${PR_NUMBER}"
-          echo "workspace=$WORKSPACE" >> $GITHUB_OUTPUT
+          # Clone the repository
+          git clone https://github.com/LeChienCour/VoiceChatMod.git
+          cd VoiceChatMod
+          git checkout main
+          
+          # Make gradlew executable
+          chmod +x ./gradlew
+          
+          # Verify gradlew is executable
+          if [ ! -x ./gradlew ]; then
+            echo "::error::Failed to make gradlew executable"
+            exit 1
+          fi
+          
+          # Build the mod
+          echo "Building VoiceChatMod..."
+          ./gradlew build
+          
+          # Verify build output
+          if [ ! -d "build/libs" ] || [ -z "$(ls -A build/libs/*.jar 2>/dev/null)" ]; then
+            echo "::error::No JAR files found in build/libs directory"
+            exit 1
+          fi
+          
+          echo "✅ VoiceChatMod built successfully"
 
+      - name: Upload Build Artifacts
+        if: matrix.task == 'mod-build'
+        uses: actions/upload-artifact@v4
+        with:
+          name: voicechat-mod
+          path: VoiceChatMod/build/libs/*.jar
+          if-no-files-found: error
+          
+      - name: Verify AWS Access
+        if: matrix.task == 'instance-setup'
+        run: |
+          if ! aws sts get-caller-identity; then
+            echo "::error::Failed to authenticate with AWS. Please check credentials."
+            exit 1
+          fi
+          
+      - name: Setup Instance
+        if: matrix.task == 'instance-setup'
+        run: |
+          # Verify instance IP is set
+          if [ -z "$INSTANCE_IP" ]; then
+            echo "::error::INSTANCE_IP environment variable is required but not set. This should be provided from Terraform outputs."
+            exit 1
+          fi
+          
+          # Create SSH key file with proper PEM format
+          mkdir -p ~/.ssh
+          echo "-----BEGIN RSA PRIVATE KEY-----" > ~/.ssh/game_server_key
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" | fold -w 64 >> ~/.ssh/game_server_key
+          echo "-----END RSA PRIVATE KEY-----" >> ~/.ssh/game_server_key
+          chmod 600 ~/.ssh/game_server_key
+          
+          # Copy setup script to instance
+          scp -i ~/.ssh/game_server_key -o StrictHostKeyChecking=no .github/scripts/instance_setup.sh ec2-user@$INSTANCE_IP:~/setup.sh
+          
+          # Execute setup script on instance with AWS credentials
+          ssh -i ~/.ssh/game_server_key -o StrictHostKeyChecking=no ec2-user@$INSTANCE_IP "chmod +x ~/setup.sh && sudo AWS_ACCESS_KEY_ID=${{ secrets.AWS_ACCESS_KEY_ID }} AWS_SECRET_ACCESS_KEY=${{ secrets.AWS_SECRET_ACCESS_KEY }} AWS_REGION=${{ env.AWS_REGION }} ~/setup.sh"
+          
+      - name: Copy Mod to Instance
+        if: matrix.task == 'mod-build'
+        run: |
+          # Verify instance IP is set
+          if [ -z "$INSTANCE_IP" ]; then
+            echo "::error::INSTANCE_IP environment variable is required but not set. This should be provided from Terraform outputs."
+            exit 1
+          fi
+          
+          # Create SSH key file with proper PEM format
+          mkdir -p ~/.ssh
+          echo "-----BEGIN RSA PRIVATE KEY-----" > ~/.ssh/game_server_key
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" | fold -w 64 >> ~/.ssh/game_server_key
+          echo "-----END RSA PRIVATE KEY-----" >> ~/.ssh/game_server_key
+          chmod 600 ~/.ssh/game_server_key
+          
+          # Copy the built mod to the instance
+          scp -i ~/.ssh/game_server_key -o StrictHostKeyChecking=no VoiceChatMod/build/libs/*.jar ec2-user@$INSTANCE_IP:/opt/minecraft/mods/
+          
+          # Set correct permissions
+          ssh -i ~/.ssh/game_server_key -o StrictHostKeyChecking=no ec2-user@$INSTANCE_IP "sudo chown ec2-user:ec2-user /opt/minecraft/mods/*.jar && sudo chmod 644 /opt/minecraft/mods/*.jar"
+
+          # Get WebSocket and Cognito configuration from SSM
+          WEBSOCKET_URL=$(aws ssm get-parameter --name "/minecraft/websocket-url" --with-decryption --query "Parameter.Value" --output text)
+          WEBSOCKET_API_KEY=$(aws ssm get-parameter --name "/minecraft/websocket-api-key" --with-decryption --query "Parameter.Value" --output text)
+          USER_POOL_ID=$(aws ssm get-parameter --name "/minecraft/user-pool-id" --with-decryption --query "Parameter.Value" --output text)
+          USER_POOL_CLIENT_ID=$(aws ssm get-parameter --name "/minecraft/user-pool-client-id" --with-decryption --query "Parameter.Value" --output text)
+
+          # Create config directory if it doesn't exist
+          ssh -i ~/.ssh/game_server_key -o StrictHostKeyChecking=no ec2-user@$INSTANCE_IP "sudo mkdir -p /opt/minecraft/runs/client/config"
+
+          # Create VoiceChatMod configuration
+          ssh -i ~/.ssh/game_server_key -o StrictHostKeyChecking=no ec2-user@$INSTANCE_IP "sudo tee /opt/minecraft/runs/client/config/voicechatmod-common.toml > /dev/null << 'EOF'
+          #Enable or disable the voice chat functionality globally.
+          enableVoiceChat = true
+          #Default voice chat volume (0.0 to 1.0). This might be overridden by client-side settings later.
+          # Default: 0.7
+          # Range: 0.0 ~ 1.0
+          defaultVolume = 0.7
+          #Maximum distance (in blocks) at which players can hear each other. Set to 0 for global chat (if server supports).
+          # Default: 64
+          # Range: 0 ~ 256
+          maxVoiceDistance = 64
+          #Number of times to attempt reconnection to the voice gateway if connection is lost.
+          # Default: 3
+          # Range: 0 ~ 10
+          reconnectionAttempts = 3
+          #Delay in seconds between reconnection attempts.
+          # Default: 5
+          # Range: 1 ~ 30
+          reconnectionDelay = 5
+          #WebSocket Gateway URL for voice chat communication
+          websocketStageUrl = \"$WEBSOCKET_URL\"
+          #API Key for WebSocket Gateway authentication
+          websocketApiKey = \"$WEBSOCKET_API_KEY\"
+          #Cognito User Pool ID for authentication
+          userPoolId = \"$USER_POOL_ID\"
+          #Cognito User Pool Client ID for authentication
+          userPoolClientId = \"$USER_POOL_CLIENT_ID\"
+          #The name of the selected microphone device. Leave empty to use system default.
+          selectedMicrophone = \"\"
+          #Whether to use the system default microphone instead of a specific device.
+          useSystemDefaultMic = true
+          #Microphone boost/gain level (1.0 is normal, increase for quiet mics).
+          # Default: 1.0
+          # Range: 0.1 ~ 5.0
+          microphoneBoost = 1.0
+          EOF"
+
+          # Set correct permissions for the config file and directory
+          ssh -i ~/.ssh/game_server_key -o StrictHostKeyChecking=no ec2-user@$INSTANCE_IP "sudo chown -R ec2-user:ec2-user /opt/minecraft/runs && sudo chmod 644 /opt/minecraft/runs/client/config/voicechatmod-common.toml"
+
+      - name: Debug Instance IP
+        run: |
+          echo "Instance IP from Terraform: $INSTANCE_IP"
+          if [ -z "$INSTANCE_IP" ]; then
+            echo "::error::INSTANCE_IP is empty"
+            exit 1
+          fi
+
+  # Third job: Deploy changes to the server
+  deploy:
+    needs: [build_mod, terraform_deploy]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    env:
+      INSTANCE_IP: ${{ needs.terraform_deploy.outputs.instance_ip }}
+    steps:
+      # Set up AWS credentials
       - name: Set up AWS CLI
         uses: aws-actions/configure-aws-credentials@v4.0.2
         with:
@@ -279,138 +476,49 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: us-east-1
 
+      # Get repository code
       - uses: actions/checkout@v4.1.1
-        with:
-          repository: LeChienCour/VoiceChatMod
-          path: ./mod_source
-          ref: main
 
-      - name: Set up JDK 17
-        uses: actions/setup-java@v3.13.0
-        with:
-          java-version: '17'
-          distribution: 'temurin'
-
-      - name: Build Mod
-        id: build
-        working-directory: ./mod_source
+      - name: Debug Instance IP
         run: |
-          chmod +x ./gradlew
-          ./gradlew build --no-daemon
-          
-          MOD_JAR=$(find build/libs -type f -name "*.jar" ! -name "*-sources.jar" ! -name "*-dev.jar" | head -n1)
-          if [ -z "$MOD_JAR" ]; then
-            echo "::error::No mod jar found"
+          echo "Instance IP from Terraform: $INSTANCE_IP"
+          if [ -z "$INSTANCE_IP" ]; then
+            echo "::error::Instance IP is empty"
             exit 1
           fi
-          echo "mod_jar=$MOD_JAR" >> $GITHUB_OUTPUT
 
-      - name: Configure AWS Session Manager
-        run: |
-          # Install Session Manager plugin
-          curl "https://s3.amazonaws.com/session-manager-downloads/plugin/latest/ubuntu_64bit/session-manager-plugin.deb" -o "session-manager-plugin.deb"
-          sudo dpkg -i session-manager-plugin.deb
-          
-          # Verify installation
-          session-manager-plugin --version
-
-      - name: Get Instance ID
-        id: instance
-        run: |
-          # Get instance ID using the public IP
-          INSTANCE_IP="${{ needs.terraform_deploy.outputs.instance_ip }}"
-          INSTANCE_ID=$(aws ec2 describe-instances \
-            --filters "Name=ip-address,Values=$INSTANCE_IP" \
-            --query "Reservations[].Instances[?State.Name=='running'].InstanceId" \
-            --output text)
-          
-          if [ -z "$INSTANCE_ID" ]; then
-            echo "::error::Could not find instance ID for IP $INSTANCE_IP"
-            exit 1
-          fi
-          
-          echo "instance_id=$INSTANCE_ID" >> $GITHUB_OUTPUT
-          echo "Found instance ID: $INSTANCE_ID"
-
-      - name: Deploy and Verify
+      - name: Deploy to EC2
         id: deploy
-        env:
-          INSTANCE_ID: ${{ steps.instance.outputs.instance_id }}
         run: |
-          echo "Starting deployment using AWS Systems Manager..."
+          # Create SSH key file with proper PEM format
+          mkdir -p ~/.ssh
+          echo "-----BEGIN RSA PRIVATE KEY-----" > ~/.ssh/game_server_key
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" | fold -w 64 >> ~/.ssh/game_server_key
+          echo "-----END RSA PRIVATE KEY-----" >> ~/.ssh/game_server_key
+          chmod 600 ~/.ssh/game_server_key
           
-          # First, copy the mod file to the instance
-          aws ssm send-command \
-            --instance-ids "$INSTANCE_ID" \
-            --document-name "AWS-RunShellScript" \
-            --parameters 'commands=["mkdir -p /opt/minecraft/server/mods"]' \
-            --output text \
-            --query "Command.CommandId" > prep_command_id.txt
+          echo "Connecting to EC2 instance at $INSTANCE_IP to restart Minecraft server..."
           
-          # Wait for the preparation command to complete
-          while true; do
-            STATUS=$(aws ssm list-command-invocations \
-              --command-id "$(cat prep_command_id.txt)" \
-              --details \
-              --query "CommandInvocations[0].Status" \
-              --output text)
+          if ssh -i ~/.ssh/game_server_key -o StrictHostKeyChecking=no ec2-user@$INSTANCE_IP "sudo systemctl restart minecraft"; then
+            echo "✅ Minecraft server restarted successfully"
+            echo "message=Server deployed and started successfully" >> $GITHUB_OUTPUT
             
-            if [[ "$STATUS" == "Success" ]]; then
-              break
-            elif [[ "$STATUS" == "Failed" || "$STATUS" == "Cancelled" || "$STATUS" == "TimedOut" ]]; then
-              echo "Error: Directory creation failed with status: $STATUS"
-              exit 1
-            fi
-            sleep 5
-          done
-          
-          # Convert the script to Unix line endings and escape it for JSON
-          SCRIPT_CONTENT=$(cat .github/scripts/deploy.sh | tr -d '\r' | sed 's/"/\\"/g')
-          
-          # Run deployment script through SSM
-          aws ssm send-command \
-            --instance-ids "$INSTANCE_ID" \
-            --document-name "AWS-RunShellScript" \
-            --parameters "{\"commands\":[\"echo '$SCRIPT_CONTENT' > /tmp/deploy.sh\",\"chmod +x /tmp/deploy.sh\",\"sudo /tmp/deploy.sh\"]}" \
-            --output text \
-            --query "Command.CommandId" > command_id.txt
-          
-          COMMAND_ID=$(cat command_id.txt)
-          echo "Deployment command ID: $COMMAND_ID"
-          
-          # Wait for command completion and stream output
-          while true; do
-            STATUS=$(aws ssm list-command-invocations \
-              --command-id "$COMMAND_ID" \
-              --details \
-              --query "CommandInvocations[0].Status" \
-              --output text)
+            # Get startup log (first 50 lines)
+            STARTUP_LOG=$(ssh -i ~/.ssh/game_server_key -o StrictHostKeyChecking=no ec2-user@$INSTANCE_IP "sudo journalctl -u minecraft -n 50" | base64 -w 0)
+            echo "startup_log=$STARTUP_LOG" >> $GITHUB_OUTPUT
+            exit 0
+              else
+            echo "❌ Failed to restart Minecraft server"
             
-            # Get command output
-            aws ssm get-command-invocation \
-              --command-id "$COMMAND_ID" \
-              --instance-id "$INSTANCE_ID" \
-              --query "StandardOutputContent" \
-              --output text || true
-            
-            if [[ "$STATUS" == "Success" ]]; then
-              echo "Deployment completed successfully"
-              break
-            elif [[ "$STATUS" == "Failed" || "$STATUS" == "Cancelled" || "$STATUS" == "TimedOut" ]]; then
-              echo "Error: Deployment failed with status: $STATUS"
-              aws ssm get-command-invocation \
-                --command-id "$COMMAND_ID" \
-                --instance-id "$INSTANCE_ID" \
-                --query "StandardErrorContent" \
-                --output text || true
-              exit 1
-            fi
-            
-            echo "Waiting for deployment to complete... Current status: $STATUS"
-            sleep 10
-          done
+            # Get error log
+            ERROR_LOG=$(ssh -i ~/.ssh/game_server_key -o StrictHostKeyChecking=no ec2-user@$INSTANCE_IP "sudo journalctl -u minecraft -n 50" | base64 -w 0)
+            echo "error_log=$ERROR_LOG" >> $GITHUB_OUTPUT
+            echo "message=Failed to restart the Minecraft server" >> $GITHUB_OUTPUT
+            exit 1
+          fi
 
-      - name: Report Status
+      # Update PR with deployment results
+      - name: Update PR with Deployment Results
         if: always()
         uses: actions/github-script@v7.0.1
         with:
@@ -418,7 +526,7 @@ jobs:
           script: |
             const status = '${{ steps.deploy.outcome }}' === 'success' ? '✅' : '❌';
             const message = '${{ steps.deploy.outputs.message }}' || 'No status message available';
-            const ip = '${{ needs.terraform_deploy.outputs.instance_ip }}';
+            const ip = '${{ env.INSTANCE_IP }}';
             
             let logDetails = '';
             if (status === '✅' && '${{ steps.deploy.outputs.startup_log }}') {
@@ -429,39 +537,24 @@ jobs:
               logDetails = '\n\n<details><summary>Error Log</summary>\n\n```\n' + errorLog + '\n```\n</details>';
             }
             
-            const summary = `### Minecraft Server Deployment ${status}
+            const comment = `### Minecraft Server Deployment ${status}
             
             **Status:** ${status} ${message}
             **Server IP:** \`${ip}\`
-            
-            ${status === '✅' ? 
-              '✅ Server is running and ready to use' : 
-              '❌ Deployment encountered issues - check workflow logs for details'
-            }${logDetails}`;
-            
-            // Split long messages if needed
-            const maxLength = 65536; // GitHub's comment length limit
-            let finalSummary = summary;
-            if (summary.length > maxLength) {
-              finalSummary = summary.substring(0, maxLength - 3) + '...';
-            }
+            ${logDetails}`;
             
             await github.rest.issues.createComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: context.issue.number,
-              body: finalSummary
+              body: comment
             });
 
+  # Final job: Clean up infrastructure
+  # Only runs for PR events, not for main branch deployments
   cleanup_infrastructure:
-    needs: [terraform_deploy, deploy_mod]
-    if: |
-      always() && 
-      (
-        needs.terraform_deploy.result == 'failure' ||
-        needs.deploy_mod.result == 'failure' ||
-        (needs.terraform_deploy.result == 'success' && needs.deploy_mod.result == 'success')
-      )
+    needs: [terraform_deploy, build_mod, deploy]
+    if: always() && github.event_name == 'pull_request' && (needs.terraform_deploy.result == 'failure' || needs.build_mod.result == 'failure' || needs.deploy.result == 'failure' || (needs.terraform_deploy.result == 'success' && needs.build_mod.result == 'success' && needs.deploy.result == 'success'))
     runs-on: ubuntu-latest
     permissions:
       contents: read

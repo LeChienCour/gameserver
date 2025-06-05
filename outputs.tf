@@ -135,22 +135,6 @@ output "lambda_role_name" {
   value       = module.iam.lambda_role_name
 }
 
-# KMS Information
-output "kms_key_arn" {
-  description = "The ARN of the KMS key"
-  value       = module.kms.key_arn
-}
-
-output "kms_key_id" {
-  description = "The ID of the KMS key"
-  value       = module.kms.key_id
-}
-
-output "kms_alias_arn" {
-  description = "The ARN of the KMS key alias"
-  value       = module.kms.alias_arn
-}
-
 # Lambda Information
 output "lambda_functions" {
   description = "Map of Lambda function information"
