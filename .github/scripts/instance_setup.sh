@@ -48,10 +48,14 @@ else
     echo "Git is already installed"
 fi
 
+# Get current user
+CURRENT_USER=$(whoami)
+MINECRAFT_DIR="/home/$CURRENT_USER/minecraft"
+
 # Create necessary directories
 echo "Creating Minecraft directories..."
-sudo mkdir -p /home/ec2-user/minecraft/{mods,config,runs,logs}
-sudo chown -R ec2-user:ec2-user /home/ec2-user/minecraft
+sudo mkdir -p "$MINECRAFT_DIR"/{mods,config,runs,logs}
+sudo chown -R "$CURRENT_USER:$CURRENT_USER" "$MINECRAFT_DIR"
 
 # Create CloudWatch log groups
 echo "Creating CloudWatch log groups..."
@@ -60,20 +64,20 @@ aws logs create-log-group --log-group-name /minecraft/voice-chat-logs || true
 
 # Update CloudWatch agent configuration
 echo "Updating CloudWatch agent configuration..."
-sudo tee /opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json > /dev/null << 'EOF'
+sudo tee /opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json > /dev/null << EOF
 {
     "logs": {
         "logs_collected": {
             "files": {
                 "collect_list": [
                     {
-                        "file_path": "/home/ec2-user/minecraft/logs/latest.log",
+                        "file_path": "$MINECRAFT_DIR/logs/latest.log",
                         "log_group_name": "/minecraft/server-logs",
                         "log_stream_name": "{instance_id}",
                         "timezone": "UTC"
                     },
                     {
-                        "file_path": "/home/ec2-user/minecraft/logs/voicechat.log",
+                        "file_path": "$MINECRAFT_DIR/logs/voicechat.log",
                         "log_group_name": "/minecraft/voice-chat-logs",
                         "log_stream_name": "{instance_id}",
                         "timezone": "UTC"
@@ -86,22 +90,22 @@ sudo tee /opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json > /de
 EOF
 
 # Check if Minecraft server exists
-if [ ! -f "/home/ec2-user/minecraft/server.jar" ]; then
+if [ ! -f "$MINECRAFT_DIR/server.jar" ]; then
     echo "Downloading Minecraft server..."
-    wget https://piston-data.mojang.com/v1/objects/8dd1a28015f51b1803213892b50b7b4fc76e594d/server.jar -O /home/ec2-user/minecraft/server.jar
+    wget https://piston-data.mojang.com/v1/objects/8dd1a28015f51b1803213892b50b7b4fc76e594d/server.jar -O "$MINECRAFT_DIR/server.jar"
 fi
 
 # Create systemd service file
 echo "Creating Minecraft service..."
-sudo tee /etc/systemd/system/minecraft.service > /dev/null << 'EOF'
+sudo tee /etc/systemd/system/minecraft.service > /dev/null << EOF
 [Unit]
 Description=Minecraft Server
 After=network.target
 
 [Service]
 Type=simple
-User=ec2-user
-WorkingDirectory=/home/ec2-user/minecraft
+User=$CURRENT_USER
+WorkingDirectory=$MINECRAFT_DIR
 ExecStart=/usr/bin/java -Xmx2G -Xms2G -jar server.jar nogui
 Restart=on-failure
 RestartSec=10
