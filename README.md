@@ -7,7 +7,7 @@
 
 This repository demonstrates the Terraform infrastructure code for a game server with real-time voice chat capabilities. 
 The project showcases various AWS services integration, infrastructure as code practices, and modern CI/CD implementation.
-
+test
 ## Architecture Overview
 
 The infrastructure consists of several key components:
