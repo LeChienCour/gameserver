@@ -394,7 +394,7 @@ jobs:
           ssh -i ~/.ssh/game_server_key -o StrictHostKeyChecking=no ec2-user@$INSTANCE_IP "sudo mkdir -p /opt/minecraft/runs/client/config"
 
           # Create VoiceChatMod configuration
-          ssh -i ~/.ssh/game_server_key -o StrictHostKeyChecking=no ec2-user@$INSTANCE_IP "cat > /opt/minecraft/runs/client/config/voicechatmod-common.toml << 'EOF'
+          ssh -i ~/.ssh/game_server_key -o StrictHostKeyChecking=no ec2-user@$INSTANCE_IP "sudo tee /opt/minecraft/runs/client/config/voicechatmod-common.toml > /dev/null << 'EOF'
           #Enable or disable the voice chat functionality globally.
           enableVoiceChat = true
           #Default voice chat volume (0.0 to 1.0). This might be overridden by client-side settings later.
