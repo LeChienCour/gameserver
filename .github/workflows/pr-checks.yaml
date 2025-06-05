@@ -338,14 +338,21 @@ jobs:
       - name: Setup Instance
         if: matrix.task == 'instance-setup'
         run: |
-          # Create SSH key file with proper format and encoding
+          # Create SSH key file with proper PEM format
           mkdir -p ~/.ssh
-          echo "${{ secrets.SSH_PRIVATE_KEY }}" | base64 -d > ~/.ssh/game_server_key
+          echo "-----BEGIN RSA PRIVATE KEY-----" > ~/.ssh/game_server_key
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" | fold -w 64 >> ~/.ssh/game_server_key
+          echo "-----END RSA PRIVATE KEY-----" >> ~/.ssh/game_server_key
           chmod 600 ~/.ssh/game_server_key
           
           # Debug: Check key format
           echo "Checking SSH key format..."
-          ssh-keygen -l -f ~/.ssh/game_server_key || echo "::error::Invalid key format"
+          if ! ssh-keygen -l -f ~/.ssh/game_server_key; then
+            echo "::error::Invalid key format"
+            echo "Key contents (first line only):"
+            head -n 1 ~/.ssh/game_server_key
+            exit 1
+          fi
           
           # Debug: Show key type
           echo "Key type:"
@@ -375,14 +382,21 @@ jobs:
       - name: Copy Mod to Instance
         if: matrix.task == 'mod-build'
         run: |
-          # Create SSH key file with proper format and encoding
+          # Create SSH key file with proper PEM format
           mkdir -p ~/.ssh
-          echo "${{ secrets.SSH_PRIVATE_KEY }}" | base64 -d > ~/.ssh/game_server_key
+          echo "-----BEGIN RSA PRIVATE KEY-----" > ~/.ssh/game_server_key
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" | fold -w 64 >> ~/.ssh/game_server_key
+          echo "-----END RSA PRIVATE KEY-----" >> ~/.ssh/game_server_key
           chmod 600 ~/.ssh/game_server_key
           
           # Debug: Check key format
           echo "Checking SSH key format..."
-          ssh-keygen -l -f ~/.ssh/game_server_key || echo "::error::Invalid key format"
+          if ! ssh-keygen -l -f ~/.ssh/game_server_key; then
+            echo "::error::Invalid key format"
+            echo "Key contents (first line only):"
+            head -n 1 ~/.ssh/game_server_key
+            exit 1
+          fi
           
           # Debug: Show key type
           echo "Key type:"
