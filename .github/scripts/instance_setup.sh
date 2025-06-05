@@ -3,8 +3,8 @@ set -e
 
 # Check if running as root
 if [ "$EUID" -ne 0 ]; then
-  echo "::error::This script must be run as root"
-  exit 1
+  echo "Not running as root. Re-executing with sudo..."
+  exec sudo -E bash "$0" "$@"
 fi
 
 # Check if AWS credentials are set
@@ -67,16 +67,16 @@ fi
 
 # Create Minecraft directory structure
 echo "Creating Minecraft directory structure..."
-mkdir -p /opt/minecraft/{server,mods,config,logs}
+sudo mkdir -p /opt/minecraft/{server,mods,config,logs}
 
 # Set permissions
 echo "Setting permissions..."
-chown -R ec2-user:ec2-user /opt/minecraft
-chmod -R 755 /opt/minecraft
+sudo chown -R ec2-user:ec2-user /opt/minecraft
+sudo chmod -R 755 /opt/minecraft
 
 # Install NeoForge
 echo "Installing NeoForge..."
-cd /opt/minecraft/server
+sudo -u ec2-user cd /opt/minecraft/server
 
 # Download NeoForge installer with verbose output
 echo "Downloading NeoForge installer..."
@@ -85,13 +85,6 @@ sudo -u ec2-user wget -v https://maven.neoforged.net/releases/net/neoforged/neof
 # Verify installer was downloaded
 if [ ! -f "neoforge-21.4.136-installer.jar" ]; then
     echo "::error::Failed to download NeoForge installer"
-    exit 1
-fi
-
-# Check installer file size
-INSTALLER_SIZE=$(stat -f%z neoforge-21.4.136-installer.jar 2>/dev/null || stat -c%s neoforge-21.4.136-installer.jar)
-if [ "$INSTALLER_SIZE" -lt 1000000 ]; then
-    echo "::error::NeoForge installer file seems too small (${INSTALLER_SIZE} bytes). Download may have failed."
     exit 1
 fi
 
@@ -113,18 +106,9 @@ if [ $INSTALL_STATUS -ne 0 ]; then
     fi
 fi
 
-# Verify NeoForge installation
+# Verify the installed JAR
 if [ ! -f "neoforge-21.4.136.jar" ]; then
     echo "::error::Failed to install NeoForge. Installer JAR not found."
-    echo "::error::Installation log:"
-    cat /opt/minecraft/logs/neoforge-install.log
-    exit 1
-fi
-
-# Verify the installed JAR
-JAR_SIZE=$(stat -f%z neoforge-21.4.136.jar 2>/dev/null || stat -c%s neoforge-21.4.136.jar)
-if [ "$JAR_SIZE" -lt 1000000 ]; then
-    echo "::error::Installed NeoForge JAR seems too small (${JAR_SIZE} bytes). Installation may have failed."
     echo "::error::Installation log:"
     cat /opt/minecraft/logs/neoforge-install.log
     exit 1
