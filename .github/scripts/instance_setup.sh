@@ -80,16 +80,16 @@ cd /opt/minecraft/server
 
 # Download NeoForge installer with verbose output
 echo "Downloading NeoForge installer..."
-sudo -u ec2-user wget -v https://maven.neoforged.net/releases/net/neoforged/neoforge/1.21.4/neoforge-1.21.4-installer.jar
+sudo -u ec2-user wget -v https://maven.neoforged.net/releases/net/neoforged/neoforge/21.4.136/neoforge-21.4.136-installer.jar
 
 # Verify installer was downloaded
-if [ ! -f "neoforge-1.21.4-installer.jar" ]; then
+if [ ! -f "neoforge-21.4.136-installer.jar" ]; then
     echo "::error::Failed to download NeoForge installer"
     exit 1
 fi
 
 # Check installer file size
-INSTALLER_SIZE=$(stat -f%z neoforge-1.21.4-installer.jar 2>/dev/null || stat -c%s neoforge-1.21.4-installer.jar)
+INSTALLER_SIZE=$(stat -f%z neoforge-21.4.136-installer.jar 2>/dev/null || stat -c%s neoforge-21.4.136-installer.jar)
 if [ "$INSTALLER_SIZE" -lt 1000000 ]; then
     echo "::error::NeoForge installer file seems too small (${INSTALLER_SIZE} bytes). Download may have failed."
     exit 1
@@ -97,7 +97,7 @@ fi
 
 echo "Running NeoForge installer..."
 # Run installer with verbose output and capture both stdout and stderr
-sudo -u ec2-user java -jar neoforge-1.21.4-installer.jar --installServer --verbose 2>&1 | tee /opt/minecraft/logs/neoforge-install.log
+sudo -u ec2-user java -jar neoforge-21.4.136-installer.jar --installServer --verbose 2>&1 | tee /opt/minecraft/logs/neoforge-install.log
 
 # Check installer exit status
 INSTALL_STATUS=${PIPESTATUS[0]}
@@ -108,7 +108,7 @@ if [ $INSTALL_STATUS -ne 0 ]; then
 fi
 
 # Verify NeoForge installation
-if [ ! -f "neoforge-1.21.4.jar" ]; then
+if [ ! -f "neoforge-21.4.136.jar" ]; then
     echo "::error::Failed to install NeoForge. Installer JAR not found."
     echo "::error::Installation log:"
     cat /opt/minecraft/logs/neoforge-install.log
@@ -116,7 +116,7 @@ if [ ! -f "neoforge-1.21.4.jar" ]; then
 fi
 
 # Verify the installed JAR
-JAR_SIZE=$(stat -f%z neoforge-1.21.4.jar 2>/dev/null || stat -c%s neoforge-1.21.4.jar)
+JAR_SIZE=$(stat -f%z neoforge-21.4.136.jar 2>/dev/null || stat -c%s neoforge-21.4.136.jar)
 if [ "$JAR_SIZE" -lt 1000000 ]; then
     echo "::error::Installed NeoForge JAR seems too small (${JAR_SIZE} bytes). Installation may have failed."
     echo "::error::Installation log:"
@@ -127,7 +127,7 @@ fi
 echo "✅ NeoForge installation verified"
 
 # Clean up installer
-sudo -u ec2-user rm -f neoforge-1.21.4-installer.jar
+sudo -u ec2-user rm -f neoforge-21.4.136-installer.jar
 
 # Accept EULA and create basic server configuration
 echo "Configuring server..."
@@ -195,7 +195,7 @@ User=ec2-user
 WorkingDirectory=/opt/minecraft/server
 Environment="JAVA_HOME=/usr/lib/jvm/java-21-amazon-corretto"
 Environment="PATH=/usr/lib/jvm/java-21-amazon-corretto/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin"
-ExecStart=/usr/lib/jvm/java-21-amazon-corretto/bin/java -Xmx2G -Xms2G -jar neoforge-1.21.4.jar nogui
+ExecStart=/usr/lib/jvm/java-21-amazon-corretto/bin/java -Xmx2G -Xms2G -jar neoforge-21.4.136.jar nogui
 Restart=on-failure
 RestartSec=10
 
