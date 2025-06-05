@@ -83,7 +83,9 @@ NEOFORGE_JAR="/opt/minecraft/server/libraries/net/neoforged/neoforge/21.4.136/ne
 if [ -f "$NEOFORGE_JAR" ] && [ -L "/opt/minecraft/server/neoforge-21.4.136.jar" ]; then
     echo "✅ NeoForge is already installed"
 else
-    # Ensure proper permissions
+    # Ensure proper permissions and create necessary directories
+    echo "Setting up directories and permissions..."
+    sudo mkdir -p /opt/minecraft/server/libraries/net/neoforged/neoform/1.21.4-20241203.161809
     sudo chown -R ec2-user:ec2-user /opt/minecraft/server
     sudo chmod -R 755 /opt/minecraft/server
 
