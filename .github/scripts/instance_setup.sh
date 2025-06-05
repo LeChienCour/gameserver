@@ -40,12 +40,14 @@ if command_exists java; then
     
     if [ "$CURRENT_JAVA_VERSION" != "21" ] || ! is_corretto; then
         echo "Updating Java to Amazon Corretto 21 (headless)..."
-        sudo yum remove -y java-*
+        # Remove existing Java installation
+        sudo apt remove -y openjdk-*
         # Add Amazon Corretto repository
-        sudo rpm --import https://yum.corretto.aws/corretto.key
-        sudo curl -L -o /etc/yum.repos.d/corretto.repo https://yum.corretto.aws/corretto.repo
+        wget -O- https://apt.corretto.aws/corretto.key | sudo apt-key add -
+        sudo add-apt-repository 'deb https://apt.corretto.aws stable main'
+        sudo apt update
         # Install headless variant
-        sudo yum install -y java-21-amazon-corretto-headless
+        sudo apt install -y java-21-amazon-corretto-headless
         
         # Verify new Java installation
         NEW_JAVA_VERSION=$(get_java_version)
@@ -61,16 +63,17 @@ if command_exists java; then
 else
     echo "Installing Amazon Corretto 21 (headless)..."
     # Add Amazon Corretto repository
-    sudo rpm --import https://yum.corretto.aws/corretto.key
-    sudo curl -L -o /etc/yum.repos.d/corretto.repo https://yum.corretto.aws/corretto.repo
+    wget -O- https://apt.corretto.aws/corretto.key | sudo apt-key add -
+    sudo add-apt-repository 'deb https://apt.corretto.aws stable main'
+    sudo apt update
     # Install headless variant
-    sudo yum install -y java-21-amazon-corretto-headless
+    sudo apt install -y java-21-amazon-corretto-headless
 fi
 
 # Check if Git is installed
 if ! command_exists git; then
     echo "Installing Git..."
-    sudo yum install -y git
+    sudo apt install -y git
 else
     echo "Git is already installed"
 fi
@@ -86,7 +89,7 @@ sudo chown -R "$CURRENT_USER:$CURRENT_USER" "$MINECRAFT_DIR"
 
 # Install and configure CloudWatch agent
 echo "Installing CloudWatch agent..."
-sudo yum install -y amazon-cloudwatch-agent
+sudo apt install -y amazon-cloudwatch-agent
 
 # Create CloudWatch agent configuration directory if it doesn't exist
 sudo mkdir -p /opt/aws/amazon-cloudwatch-agent/etc/
