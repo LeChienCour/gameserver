@@ -471,14 +471,34 @@ jobs:
           fi
 
       - name: Deploy to EC2
-        uses: appleboy/ssh-action@master
-        with:
-          host: ${{ env.INSTANCE_IP }}
-          username: ec2-user
-          key: ${{ secrets.SSH_PRIVATE_KEY }}
-          script: |
-            # Restart the Minecraft server to ensure mod is loaded
-            sudo systemctl restart minecraft
+        id: deploy
+        run: |
+          # Create SSH key file with proper PEM format
+          mkdir -p ~/.ssh
+          echo "-----BEGIN RSA PRIVATE KEY-----" > ~/.ssh/game_server_key
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" | fold -w 64 >> ~/.ssh/game_server_key
+          echo "-----END RSA PRIVATE KEY-----" >> ~/.ssh/game_server_key
+          chmod 600 ~/.ssh/game_server_key
+          
+          echo "Connecting to EC2 instance at $INSTANCE_IP to restart Minecraft server..."
+          
+          if ssh -i ~/.ssh/game_server_key -o StrictHostKeyChecking=no ec2-user@$INSTANCE_IP "sudo systemctl restart minecraft"; then
+            echo "✅ Minecraft server restarted successfully"
+            echo "message=Server deployed and started successfully" >> $GITHUB_OUTPUT
+            
+            # Get startup log (first 50 lines)
+            STARTUP_LOG=$(ssh -i ~/.ssh/game_server_key -o StrictHostKeyChecking=no ec2-user@$INSTANCE_IP "sudo journalctl -u minecraft -n 50" | base64 -w 0)
+            echo "startup_log=$STARTUP_LOG" >> $GITHUB_OUTPUT
+            exit 0
+              else
+            echo "❌ Failed to restart Minecraft server"
+            
+            # Get error log
+            ERROR_LOG=$(ssh -i ~/.ssh/game_server_key -o StrictHostKeyChecking=no ec2-user@$INSTANCE_IP "sudo journalctl -u minecraft -n 50" | base64 -w 0)
+            echo "error_log=$ERROR_LOG" >> $GITHUB_OUTPUT
+            echo "message=Failed to restart the Minecraft server" >> $GITHUB_OUTPUT
+            exit 1
+          fi
 
       # Update PR with deployment results
       - name: Update PR with Deployment Results
