@@ -23,21 +23,48 @@ command_exists() {
     command -v "$1" >/dev/null 2>&1
 }
 
-# Check if Java is installed
-if ! command_exists java; then
-    echo "Installing Java 21..."
-    # Add Amazon Corretto repository
-    sudo yum update -y
-    sudo yum install -y wget
-    wget https://corretto.aws/downloads/latest/amazon-corretto-21-x64-linux-jdk.rpm
-    sudo yum localinstall -y amazon-corretto-21-x64-linux-jdk.rpm
-    rm amazon-corretto-21-x64-linux-jdk.rpm
+# Function to get Java version
+get_java_version() {
+    java -version 2>&1 | awk -F '"' '/version/ {print $2}' | cut -d'.' -f1
+}
+
+# Function to check if Java is Amazon Corretto
+is_corretto() {
+    java -version 2>&1 | grep -q "Corretto"
+}
+
+# Check and update Java if needed
+if command_exists java; then
+    CURRENT_JAVA_VERSION=$(get_java_version)
+    echo "Current Java version: $CURRENT_JAVA_VERSION"
     
-    # Verify Java installation
-    java -version
+    if [ "$CURRENT_JAVA_VERSION" != "21" ] || ! is_corretto; then
+        echo "Updating Java to Amazon Corretto 21 (headless)..."
+        sudo yum remove -y java-*
+        # Add Amazon Corretto repository
+        sudo rpm --import https://yum.corretto.aws/corretto.key
+        sudo curl -L -o /etc/yum.repos.d/corretto.repo https://yum.corretto.aws/corretto.repo
+        # Install headless variant
+        sudo yum install -y java-21-amazon-corretto-headless
+        
+        # Verify new Java installation
+        NEW_JAVA_VERSION=$(get_java_version)
+        echo "New Java version: $NEW_JAVA_VERSION"
+        
+        if [ "$NEW_JAVA_VERSION" != "21" ] || ! is_corretto; then
+            echo "::error::Failed to install Amazon Corretto 21. Current version: $NEW_JAVA_VERSION"
+            exit 1
+        fi
+    else
+        echo "Amazon Corretto 21 is already installed"
+    fi
 else
-    echo "Java is already installed"
-    java -version
+    echo "Installing Amazon Corretto 21 (headless)..."
+    # Add Amazon Corretto repository
+    sudo rpm --import https://yum.corretto.aws/corretto.key
+    sudo curl -L -o /etc/yum.repos.d/corretto.repo https://yum.corretto.aws/corretto.repo
+    # Install headless variant
+    sudo yum install -y java-21-amazon-corretto-headless
 fi
 
 # Check if Git is installed
@@ -56,6 +83,13 @@ MINECRAFT_DIR="/home/$CURRENT_USER/minecraft"
 echo "Creating Minecraft directories..."
 sudo mkdir -p "$MINECRAFT_DIR"/{mods,config,runs,logs}
 sudo chown -R "$CURRENT_USER:$CURRENT_USER" "$MINECRAFT_DIR"
+
+# Install and configure CloudWatch agent
+echo "Installing CloudWatch agent..."
+sudo yum install -y amazon-cloudwatch-agent
+
+# Create CloudWatch agent configuration directory if it doesn't exist
+sudo mkdir -p /opt/aws/amazon-cloudwatch-agent/etc/
 
 # Create CloudWatch log groups
 echo "Creating CloudWatch log groups..."
@@ -88,6 +122,11 @@ sudo tee /opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json > /de
     }
 }
 EOF
+
+# Start and enable CloudWatch agent
+echo "Starting CloudWatch agent..."
+sudo systemctl enable amazon-cloudwatch-agent
+sudo systemctl start amazon-cloudwatch-agent
 
 # Check if Minecraft server exists
 if [ ! -f "$MINECRAFT_DIR/server.jar" ]; then
