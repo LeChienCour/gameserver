@@ -5,6 +5,7 @@ on:
     branches:
       - main
     types: [opened, synchronize, reopened]
+  workflow_dispatch:
 
 # Global minimum permissions
 permissions: read-all
@@ -26,7 +27,9 @@ jobs:
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: us-east-1
+          aws-region: ${{ secrets.AWS_REGION }}
+        env:
+          AWS_REGION: ${{ secrets.AWS_REGION }}
 
       - name: Set up Terraform
         uses: hashicorp/setup-terraform@v3.0.0
@@ -268,99 +271,47 @@ jobs:
       matrix:
         task: [instance-setup, mod-build]
     steps:
-      # Set up AWS credentials first
-      - name: Set up AWS CLI
-        uses: aws-actions/configure-aws-credentials@v4.0.2
+      - uses: actions/checkout@v4
+      
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
         with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: us-east-1
-
-      # Verify AWS credentials and SSM access
+          distribution: 'temurin'
+          java-version: '21'
+          
+      - name: Build with Gradle
+        uses: gradle/gradle-build-action@v2
+        with:
+          arguments: build
+          
       - name: Verify AWS Access
         run: |
-          echo "Verifying AWS credentials..."
           if ! aws sts get-caller-identity; then
-            echo "::error::Failed to verify AWS credentials"
+            echo "::error::Failed to authenticate with AWS. Please check credentials."
             exit 1
           fi
           
-          echo "Testing SSM parameter access..."
-          # Test access to required SSM parameters
-          PR_NUMBER=$(echo $GITHUB_REF | cut -d'/' -f3)
-          STAGE="pr-${PR_NUMBER}"
-          
-          PARAMS=(
-            "/gameserver/$STAGE/websocket/stage_url"
-            "/gameserver/$STAGE/websocket/api_key"
-            "/gameserver/$STAGE/cognito/user_pool_id"
-            "/gameserver/$STAGE/cognito/user_pool_client_id"
-          )
-          
-          for param in "${PARAMS[@]}"; do
-            echo "Testing access to $param"
-            if ! aws ssm get-parameter --name "$param" --with-decryption >/dev/null 2>&1; then
-              echo "::warning::SSM parameter $param not found, this is expected for new PR environments"
-            fi
-          done
-          echo "✅ AWS credentials verification completed"
-
-      # Get repository code (includes deployment scripts)
-      - uses: actions/checkout@v4.1.1
-
-      # Get mod source code
-      - uses: actions/checkout@v4.1.1
-        if: matrix.task == 'mod-build'
-        with:
-          repository: LeChienCour/VoiceChatMod
-          path: ./mod_source
-          ref: main
-
-      # Set up Java for mod building
-      - name: Set up JDK 21
-        if: matrix.task == 'mod-build'
-        uses: actions/setup-java@v3.13.0
-        with:
-          java-version: '21'
-          distribution: 'temurin'
-
-      # Setup instance
-      - name: Setup instance
-        if: matrix.task == 'instance-setup'
+      - name: Setup Instance
         run: |
-          chmod +x .github/scripts/instance_setup.sh
-          .github/scripts/instance_setup.sh
-        env:
-          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
-          STAGE: pr-${{ github.event.pull_request.number }}
-          INSTANCE_IP: ${{ needs.terraform_deploy.outputs.instance_ip }}
-
-      # Build the mod
-      - name: Build Mod
-        if: matrix.task == 'mod-build'
-        id: build
-        working-directory: ./mod_source
-        run: |
-          chmod +x ./gradlew
-          ./gradlew wrapper --gradle-version 8.14
-          ./gradlew build --no-daemon
+          # Create SSH key file
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/game_server_key
+          chmod 600 ~/.ssh/game_server_key
           
-          # Find the main mod JAR file (excluding sources and dev jars)
-          MOD_JAR=$(find build/libs -type f -name "*.jar" ! -name "*-sources.jar" ! -name "*-dev.jar" | head -n1)
-          if [ -z "$MOD_JAR" ]; then
-            echo "::error::No mod jar found"
-            exit 1
-          fi
-          echo "Found mod JAR: $MOD_JAR"
-          echo "mod_jar=$MOD_JAR" >> $GITHUB_OUTPUT
-
-      # Upload built mod
-      - name: Upload built mod
-        if: matrix.task == 'mod-build'
+          # Get instance IP from Terraform output
+          INSTANCE_IP=$(aws ssm get-parameter --name "/minecraft/pr-${{ github.event.pull_request.number }}/instance-ip" --query "Parameter.Value" --output text)
+          
+          # Copy setup script to instance
+          scp -i ~/.ssh/game_server_key -o StrictHostKeyChecking=no .github/scripts/instance_setup.sh ec2-user@$INSTANCE_IP:~/setup.sh
+          
+          # Execute setup script on instance with AWS credentials
+          ssh -i ~/.ssh/game_server_key -o StrictHostKeyChecking=no ec2-user@$INSTANCE_IP "chmod +x ~/setup.sh && sudo AWS_ACCESS_KEY_ID=${{ secrets.AWS_ACCESS_KEY_ID }} AWS_SECRET_ACCESS_KEY=${{ secrets.AWS_SECRET_ACCESS_KEY }} AWS_REGION=${{ env.AWS_REGION }} ~/setup.sh"
+          
+      - name: Upload Build Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: minecraft-mod
-          path: ${{ steps.build.outputs.mod_jar }}
+          name: mod-build
+          path: build/libs/*.jar
           if-no-files-found: error
 
   deploy:

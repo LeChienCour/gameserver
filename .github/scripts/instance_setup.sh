@@ -3,20 +3,19 @@ set -e
 
 echo "Starting instance setup..."
 
-# Set up SSH key for deployment with proper RSA format
-mkdir -p ~/.ssh
-echo "-----BEGIN RSA PRIVATE KEY-----" > ~/.ssh/game_server_key
-echo "$SSH_PRIVATE_KEY" | fold -w 64 >> ~/.ssh/game_server_key
-echo "-----END RSA PRIVATE KEY-----" >> ~/.ssh/game_server_key
-chmod 600 ~/.ssh/game_server_key
-
-# Get instance public IP
+# Get instance public IP and AWS region
 if [ -z "$INSTANCE_IP" ]; then
     echo "::error::INSTANCE_IP environment variable is required but not set. This should be provided from Terraform outputs."
     exit 1
 fi
 
+if [ -z "$AWS_REGION" ]; then
+    echo "::error::AWS_REGION environment variable is required but not set."
+    exit 1
+fi
+
 echo "Using instance IP: $INSTANCE_IP"
+echo "Using AWS Region: $AWS_REGION"
 
 # Function to check if a command exists
 command_exists() {
@@ -34,8 +33,9 @@ is_corretto() {
 }
 
 # Update package lists and install required packages
-sudo apt update
-sudo apt install -y wget gnupg
+echo "Updating system and installing required packages..."
+sudo yum update -y
+sudo yum install -y wget gnupg jq amazon-cloudwatch-agent
 
 # Check and update Java if needed
 if command_exists java; then
@@ -44,19 +44,17 @@ if command_exists java; then
 fi
 
 if ! command_exists java || [ "$CURRENT_JAVA_VERSION" != "21" ] || ! is_corretto; then
-    echo "Installing Amazon Corretto 21 (headless)..."
     # Remove existing Java installation if present
     if command_exists java; then
-        sudo apt remove -y openjdk-*
+        sudo yum remove -y java-*
+        echo "Existing Java installation removed"
     fi
-    
-    # Add Amazon Corretto repository
-    wget -O- https://apt.corretto.aws/corretto.key | sudo gpg --dearmor -o /usr/share/keyrings/corretto.gpg
-    echo "deb [signed-by=/usr/share/keyrings/corretto.gpg] https://apt.corretto.aws stable main" | sudo tee /etc/apt/sources.list.d/corretto.list
-    sudo apt update
-    
-    # Install headless variant
-    sudo apt install -y java-21-amazon-corretto-headless
+
+    echo "Installing Amazon Corretto 21..."
+    # Install Amazon Corretto 21
+    sudo rpm --import https://yum.corretto.aws/corretto.key
+    sudo curl -L -o /etc/yum.repos.d/corretto.repo https://yum.corretto.aws/corretto.repo
+    sudo yum install -y java-21-amazon-corretto-devel
     
     # Verify installation
     NEW_JAVA_VERSION=$(get_java_version)
@@ -72,95 +70,164 @@ fi
 # Check if Git is installed
 if ! command_exists git; then
     echo "Installing Git..."
-    sudo apt install -y git
+    sudo yum install -y git
 else
     echo "Git is already installed"
 fi
 
-# Get current user
+# Get current user and create Minecraft directory
 CURRENT_USER=$(whoami)
-MINECRAFT_DIR="/home/$CURRENT_USER/minecraft"
+MINECRAFT_DIR="/opt/minecraft"
 
-# Create necessary directories
-echo "Creating Minecraft directories..."
-sudo mkdir -p "$MINECRAFT_DIR"/{mods,config,runs,logs}
+echo "Creating Minecraft directory structure..."
+# Create base directory first
+sudo mkdir -p "$MINECRAFT_DIR"
+sudo chown "$CURRENT_USER:$CURRENT_USER" "$MINECRAFT_DIR"
+sudo chmod 755 "$MINECRAFT_DIR"
+
+# Create subdirectories
+sudo -u "$CURRENT_USER" mkdir -p "$MINECRAFT_DIR"/{server,backups,logs,mods,config}
 sudo chown -R "$CURRENT_USER:$CURRENT_USER" "$MINECRAFT_DIR"
 
-# Install and configure CloudWatch agent
-echo "Installing CloudWatch agent..."
-sudo apt install -y amazon-cloudwatch-agent
+# Install NeoForge
+echo "Installing NeoForge..."
+cd "$MINECRAFT_DIR/server"
+sudo -u "$CURRENT_USER" wget -q https://maven.neoforged.net/releases/net/neoforged/neoforge/1.21.1/neoforge-1.21.1-installer.jar
+sudo -u "$CURRENT_USER" java -jar neoforge-1.21.1-installer.jar --installServer
+sudo -u "$CURRENT_USER" rm -f neoforge-1.21.1-installer.jar
+
+# Accept EULA and create basic server configuration
+echo "Configuring server..."
+sudo -u "$CURRENT_USER" bash -c 'echo "eula=true" > eula.txt'
+sudo -u "$CURRENT_USER" bash -c 'cat > server.properties << EOF
+server-port=25565
+max-players=20
+difficulty=normal
+gamemode=survival
+EOF'
 
 # Create CloudWatch agent configuration directory if it doesn't exist
 sudo mkdir -p /opt/aws/amazon-cloudwatch-agent/etc/
 
 # Create CloudWatch log groups
 echo "Creating CloudWatch log groups..."
-aws logs create-log-group --log-group-name /minecraft/server-logs || true
-aws logs create-log-group --log-group-name /minecraft/voice-chat-logs || true
+if aws logs create-log-group --log-group-name /minecraft/server-logs --region "$AWS_REGION" 2>/dev/null; then
+    echo "✅ Created server logs group"
+else
+    echo "ℹ️ Server logs group already exists"
+fi
+
+if aws logs create-log-group --log-group-name /minecraft/voice-chat-logs --region "$AWS_REGION" 2>/dev/null; then
+    echo "✅ Created voice chat logs group"
+else
+    echo "ℹ️ Voice chat logs group already exists"
+fi
 
 # Update CloudWatch agent configuration
 echo "Updating CloudWatch agent configuration..."
 sudo tee /opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json > /dev/null << EOF
 {
-    "logs": {
-        "logs_collected": {
-            "files": {
-                "collect_list": [
-                    {
-                        "file_path": "$MINECRAFT_DIR/logs/latest.log",
-                        "log_group_name": "/minecraft/server-logs",
-                        "log_stream_name": "{instance_id}",
-                        "timezone": "UTC"
-                    },
-                    {
-                        "file_path": "$MINECRAFT_DIR/logs/voicechat.log",
-                        "log_group_name": "/minecraft/voice-chat-logs",
-                        "log_stream_name": "{instance_id}",
-                        "timezone": "UTC"
-                    }
-                ]
-            }
-        }
+  "agent": {
+    "metrics_collection_interval": 60,
+    "run_as_user": "root"
+  },
+  "logs": {
+    "logs_collected": {
+      "files": {
+        "collect_list": [
+          {
+            "file_path": "/var/log/cloud-init-output.log",
+            "log_group_name": "/minecraft/cloud-init",
+            "log_stream_name": "{instance_id}",
+            "retention_in_days": 7
+          },
+          {
+            "file_path": "/var/log/messages",
+            "log_group_name": "/minecraft/system",
+            "log_stream_name": "{instance_id}",
+            "retention_in_days": 7
+          },
+          {
+            "file_path": "$MINECRAFT_DIR/server/logs/latest.log",
+            "log_group_name": "/minecraft/server-logs",
+            "log_stream_name": "{instance_id}",
+            "retention_in_days": 7
+          },
+          {
+            "file_path": "$MINECRAFT_DIR/logs/voicechat.log",
+            "log_group_name": "/minecraft/voice-chat-logs",
+            "log_stream_name": "{instance_id}",
+            "retention_in_days": 7
+          }
+        ]
+      }
     }
+  },
+  "metrics": {
+    "metrics_collected": {
+      "mem": {
+        "measurement": ["mem_used_percent"]
+      },
+      "swap": {
+        "measurement": ["swap_used_percent"]
+      },
+      "disk": {
+        "measurement": ["used_percent"],
+        "resources": ["/"]
+      }
+    },
+    "append_dimensions": {
+      "InstanceId": "$${aws:InstanceId}"
+    }
+  }
 }
 EOF
+
+# Create systemd service file
+echo "Creating Minecraft service..."
+sudo tee /etc/systemd/system/minecraft.service > /dev/null << EOF
+[Unit]
+Description=Minecraft NeoForge Server
+After=network.target
+
+[Service]
+Type=simple
+User=$CURRENT_USER
+Group=$CURRENT_USER
+WorkingDirectory=$MINECRAFT_DIR/server
+Environment="JAVA_HOME=/usr/lib/jvm/java-21-amazon-corretto"
+Environment="PATH=/usr/lib/jvm/java-21-amazon-corretto/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin"
+
+# Restart policy
+Restart=on-failure
+RestartSec=30s
+
+ExecStart=/usr/lib/jvm/java-21-amazon-corretto/bin/java -Xms2G -Xmx4G -jar neoforge-1.21.1.jar nogui
+ExecStop=/usr/bin/bash -c 'echo "say SERVER SHUTTING DOWN IN 10 SECONDS..." > $MINECRAFT_DIR/server/console.pipe; sleep 10; echo "stop" > $MINECRAFT_DIR/server/console.pipe'
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+# Set correct permissions
+sudo chmod 644 /etc/systemd/system/minecraft.service
+
+# Allow user to manage the service
+echo "$CURRENT_USER ALL=(ALL) NOPASSWD: /bin/systemctl restart minecraft.service" | sudo tee /etc/sudoers.d/minecraft
+echo "$CURRENT_USER ALL=(ALL) NOPASSWD: /bin/systemctl start minecraft.service" | sudo tee -a /etc/sudoers.d/minecraft
+echo "$CURRENT_USER ALL=(ALL) NOPASSWD: /bin/systemctl stop minecraft.service" | sudo tee -a /etc/sudoers.d/minecraft
+echo "$CURRENT_USER ALL=(ALL) NOPASSWD: /bin/systemctl status minecraft.service" | sudo tee -a /etc/sudoers.d/minecraft
+sudo chmod 440 /etc/sudoers.d/minecraft
 
 # Start and enable CloudWatch agent
 echo "Starting CloudWatch agent..."
 sudo systemctl enable amazon-cloudwatch-agent
 sudo systemctl start amazon-cloudwatch-agent
 
-# Check if Minecraft server exists
-if [ ! -f "$MINECRAFT_DIR/server.jar" ]; then
-    echo "Downloading Minecraft server..."
-    wget https://piston-data.mojang.com/v1/objects/8dd1a28015f51b1803213892b50b7b4fc76e594d/server.jar -O "$MINECRAFT_DIR/server.jar"
-fi
-
-# Create systemd service file
-echo "Creating Minecraft service..."
-sudo tee /etc/systemd/system/minecraft.service > /dev/null << EOF
-[Unit]
-Description=Minecraft Server
-After=network.target
-
-[Service]
-Type=simple
-User=$CURRENT_USER
-WorkingDirectory=$MINECRAFT_DIR
-ExecStart=/usr/bin/java -Xmx2G -Xms2G -jar server.jar nogui
-Restart=on-failure
-RestartSec=10
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
 # Reload systemd and enable service
 echo "Enabling Minecraft service..."
 sudo systemctl daemon-reload
 sudo systemctl enable minecraft
-
-# Clean up SSH key
-rm -f ~/.ssh/game_server_key
 
 echo "Instance setup completed successfully!" 
