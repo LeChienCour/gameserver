@@ -293,11 +293,32 @@ jobs:
       - name: Clone and Build VoiceChatMod
         if: matrix.task == 'mod-build'
         run: |
+          # Clone the repository
           git clone https://github.com/LeChienCour/VoiceChatMod.git
           cd VoiceChatMod
           git checkout main
+          
+          # Make gradlew executable
+          chmod +x ./gradlew
+          
+          # Verify gradlew is executable
+          if [ ! -x ./gradlew ]; then
+            echo "::error::Failed to make gradlew executable"
+            exit 1
+          fi
+          
+          # Build the mod
+          echo "Building VoiceChatMod..."
           ./gradlew build
           
+          # Verify build output
+          if [ ! -d "build/libs" ] || [ -z "$(ls -A build/libs/*.jar 2>/dev/null)" ]; then
+            echo "::error::No JAR files found in build/libs directory"
+            exit 1
+          fi
+          
+          echo "✅ VoiceChatMod built successfully"
+
       - name: Upload Build Artifacts
         if: matrix.task == 'mod-build'
         uses: actions/upload-artifact@v4
