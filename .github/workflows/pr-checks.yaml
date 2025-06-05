@@ -1,16 +1,31 @@
+# This workflow handles both PR checks and production deployments
+# For PRs: Creates temporary infrastructure for testing and cleans up after
+# For main branch: Deploys to production and keeps infrastructure running
 name: Pull Request Checks
 
 on:
+  # Trigger on PR events for testing
   pull_request:
     branches:
       - main
     types: [opened, synchronize, reopened]
+  # Trigger on main branch pushes for production deployment
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/scripts/**'      # Deployment scripts
+      - '.github/workflows/pr-checks.yaml'  # This workflow
+      - 'terraform/**'            # Infrastructure code
+      - 'userdata.sh'            # Instance initialization
+  # Allow manual triggers for testing
   workflow_dispatch:
 
 # Global minimum permissions
 permissions: read-all
 
 jobs:
+  # First job: Deploy infrastructure using Terraform
   terraform_deploy:
     runs-on: ubuntu-latest
     permissions:
@@ -262,6 +277,7 @@ jobs:
         if: steps.plan.outcome == 'failure'
         run: exit 1
 
+  # Second job: Build and deploy the Minecraft mod
   build_mod:
     needs: [terraform_deploy]
     runs-on: ubuntu-latest
@@ -442,6 +458,7 @@ jobs:
             exit 1
           fi
 
+  # Third job: Deploy changes to the server
   deploy:
     needs: [build_mod, terraform_deploy]
     runs-on: ubuntu-latest
@@ -533,9 +550,11 @@ jobs:
               body: comment
             });
 
+  # Final job: Clean up infrastructure
+  # Only runs for PR events, not for main branch deployments
   cleanup_infrastructure:
     needs: [terraform_deploy, build_mod, deploy]
-    if: always() && (needs.terraform_deploy.result == 'failure' || needs.build_mod.result == 'failure' || needs.deploy.result == 'failure' || (needs.terraform_deploy.result == 'success' && needs.build_mod.result == 'success' && needs.deploy.result == 'success'))
+    if: always() && github.event_name == 'pull_request' && (needs.terraform_deploy.result == 'failure' || needs.build_mod.result == 'failure' || needs.deploy.result == 'failure' || (needs.terraform_deploy.result == 'success' && needs.build_mod.result == 'success' && needs.deploy.result == 'success'))
     runs-on: ubuntu-latest
     permissions:
       contents: read
