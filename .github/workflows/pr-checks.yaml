@@ -458,6 +458,14 @@ jobs:
       # Get repository code
       - uses: actions/checkout@v4.1.1
 
+      - name: Debug Instance IP
+        run: |
+          echo "Instance IP from Terraform: ${{ needs.terraform_deploy.outputs.instance_ip }}"
+          if [ -z "${{ needs.terraform_deploy.outputs.instance_ip }}" ]; then
+            echo "::error::Instance IP is empty"
+            exit 1
+          fi
+
       - name: Deploy to EC2
         uses: appleboy/ssh-action@master
         with:
