@@ -258,12 +258,15 @@ jobs:
         if: steps.plan.outcome == 'failure'
         run: exit 1
 
-  deploy_mod:
+  build_mod:
     needs: [terraform_deploy]
     runs-on: ubuntu-latest
     permissions:
       contents: read
       pull-requests: write
+    strategy:
+      matrix:
+        task: [instance-setup, mod-build]
     steps:
       # Set up AWS credentials first
       - name: Set up AWS CLI
@@ -304,32 +307,92 @@ jobs:
 
       # Get mod source code
       - uses: actions/checkout@v4.1.1
+        if: matrix.task == 'mod-build'
         with:
           repository: LeChienCour/VoiceChatMod
           path: ./mod_source
           ref: main
 
       # Set up Java for mod building
-      - name: Set up JDK 17
+      - name: Set up JDK 21
+        if: matrix.task == 'mod-build'
         uses: actions/setup-java@v3.13.0
         with:
-          java-version: '17'
+          java-version: '21'
           distribution: 'temurin'
+
+      # Setup instance
+      - name: Setup instance
+        if: matrix.task == 'instance-setup'
+        run: |
+          chmod +x .github/scripts/instance_setup.sh
+          .github/scripts/instance_setup.sh
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          STAGE: pr-${{ github.event.pull_request.number }}
+          INSTANCE_IP: ${{ needs.terraform_deploy.outputs.instance_ip }}
 
       # Build the mod
       - name: Build Mod
+        if: matrix.task == 'mod-build'
         id: build
         working-directory: ./mod_source
         run: |
           chmod +x ./gradlew
           ./gradlew build --no-daemon
           
+          # Find the main mod JAR file (excluding sources and dev jars)
           MOD_JAR=$(find build/libs -type f -name "*.jar" ! -name "*-sources.jar" ! -name "*-dev.jar" | head -n1)
           if [ -z "$MOD_JAR" ]; then
             echo "::error::No mod jar found"
             exit 1
           fi
+          echo "Found mod JAR: $MOD_JAR"
           echo "mod_jar=$MOD_JAR" >> $GITHUB_OUTPUT
+
+      # Upload built mod
+      - name: Upload built mod
+        if: matrix.task == 'mod-build'
+        uses: actions/upload-artifact@v4
+        with:
+          name: minecraft-mod
+          path: ${{ steps.build.outputs.mod_jar }}
+          if-no-files-found: error
+
+  deploy:
+    needs: [deploy_mod]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      # Set up AWS credentials
+      - name: Set up AWS CLI
+        uses: aws-actions/configure-aws-credentials@v4.0.2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+
+      # Get repository code
+      - uses: actions/checkout@v4.1.1
+
+      # Download built mod
+      - name: Download built mod
+        uses: actions/download-artifact@v4
+        with:
+          name: minecraft-mod
+          path: mod_source/build/libs
+
+      # Verify mod file
+      - name: Verify mod file
+        run: |
+          echo "Checking mod files in build/libs:"
+          ls -la mod_source/build/libs/
+          if [ ! -f mod_source/build/libs/*.jar ]; then
+            echo "::error::No mod JAR file found after download"
+            exit 1
+          fi
 
       # Deploy mod and configure server
       - name: Deploy Mod

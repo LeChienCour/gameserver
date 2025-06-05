@@ -238,3 +238,4 @@ ehthumbs_vista.db
 *.stackdump
 [Dd]esktop.ini
 $RECYCLE.BIN/
+/instance_setup.sh
