@@ -44,6 +44,7 @@ jobs:
       id-token: write      # For AWS authentication
     outputs:
       instance_ip: ${{ steps.get_ip.outputs.instance_ip }}
+      stage: ${{ steps.stage.outputs.stage }}
     steps:
       - uses: actions/checkout@v4.1.1
 
@@ -306,6 +307,7 @@ jobs:
         task: [instance-setup, mod-build]
     env:
       INSTANCE_IP: ${{ needs.terraform_deploy.outputs.instance_ip }}
+      STAGE: ${{ needs.terraform_deploy.outputs.stage }}
     steps:
       - uses: actions/checkout@v4
       
@@ -415,10 +417,10 @@ jobs:
           ssh -i ~/.ssh/game_server_key -o StrictHostKeyChecking=no ec2-user@$INSTANCE_IP "sudo chown ec2-user:ec2-user /opt/minecraft/mods/*.jar && sudo chmod 644 /opt/minecraft/mods/*.jar"
 
           # Get WebSocket and Cognito configuration from SSM
-          WEBSOCKET_URL=$(aws ssm get-parameter --name "/game-server/${{ steps.stage.outputs.stage }}/websocket/stage-url" --with-decryption --query "Parameter.Value" --output text)
-          WEBSOCKET_API_KEY=$(aws ssm get-parameter --name "/game-server/${{ steps.stage.outputs.stage }}/websocket/api-key" --with-decryption --query "Parameter.Value" --output text)
-          USER_POOL_ID=$(aws ssm get-parameter --name "/game-server/${{ steps.stage.outputs.stage }}/cognito/user-pool-id" --with-decryption --query "Parameter.Value" --output text)
-          USER_POOL_CLIENT_ID=$(aws ssm get-parameter --name "/game-server/${{ steps.stage.outputs.stage }}/cognito/user-pool-client-id" --with-decryption --query "Parameter.Value" --output text)
+          WEBSOCKET_URL=$(aws ssm get-parameter --name "/game-server/${{ env.STAGE }}/websocket/stage-url" --with-decryption --query "Parameter.Value" --output text)
+          WEBSOCKET_API_KEY=$(aws ssm get-parameter --name "/game-server/${{ env.STAGE }}/websocket/api-key" --with-decryption --query "Parameter.Value" --output text)
+          USER_POOL_ID=$(aws ssm get-parameter --name "/game-server/${{ env.STAGE }}/cognito/user-pool-id" --with-decryption --query "Parameter.Value" --output text)
+          USER_POOL_CLIENT_ID=$(aws ssm get-parameter --name "/game-server/${{ env.STAGE }}/cognito/user-pool-client-id" --with-decryption --query "Parameter.Value" --output text)
 
           # Create config directory if it doesn't exist
           ssh -i ~/.ssh/game_server_key -o StrictHostKeyChecking=no ec2-user@$INSTANCE_IP "sudo mkdir -p /opt/minecraft/runs/client/config"
