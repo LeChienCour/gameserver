@@ -264,7 +264,7 @@ jobs:
 
       - name: Update PR with Terraform Results
         uses: actions/github-script@v7.0.1
-        if: always()
+        if: github.event_name == 'pull_request' && always()
         env:
           PLAN_STATUS: ${{ steps.plan.outcome }}
           APPLY_STATUS: ${{ steps.apply.outcome }}
@@ -533,7 +533,7 @@ jobs:
 
       # Update PR with deployment results
       - name: Update PR with Deployment Results
-        if: always()
+        if: github.event_name == 'pull_request' && always()
         uses: actions/github-script@v7.0.1
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -644,7 +644,7 @@ jobs:
           terraform workspace delete ${{ steps.stage.outputs.stage }}
 
       - name: Notify Cleanup Status
-        if: always()
+        if: github.event_name == 'pull_request' && always()
         uses: actions/github-script@v7.0.1
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
