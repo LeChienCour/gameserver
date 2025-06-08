@@ -13,8 +13,8 @@ variable "event_bus_arn" {
   type        = string
 }
 
-variable "connections_table" {
-  description = "Name of the DynamoDB connections table"
+variable "project_name" {
+  description = "Name of the project"
   type        = string
 }
 

@@ -29,11 +29,6 @@ variable "event_source" {
   type        = string
 }
 
-variable "connections_table" {
-  description = "Name of the DynamoDB table for WebSocket connections"
-  type        = string
-}
-
 variable "lambda_role_arn" {
   description = "ARN of the IAM role for Lambda functions"
   type        = string
@@ -46,6 +41,11 @@ variable "api_gateway_id" {
 
 variable "api_gateway_execution_arn" {
   description = "Execution ARN of the API Gateway"
+  type        = string
+}
+
+variable "project_name" {
+  description = "Name of the project"
   type        = string
 }
 

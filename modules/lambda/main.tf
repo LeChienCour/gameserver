@@ -35,7 +35,7 @@ resource "aws_lambda_function" "validate_audio" {
 
   environment {
     variables = {
-      CONNECTIONS_TABLE = var.connections_table
+      CONNECTIONS_TABLE = "${var.project_name}-${var.stage}-connections"
       EVENT_BUS_NAME    = var.event_bus_name
       EVENT_SOURCE      = var.event_source
     }
@@ -61,7 +61,7 @@ resource "aws_lambda_function" "connect" {
 
   environment {
     variables = {
-      CONNECTIONS_TABLE = var.connections_table
+      CONNECTIONS_TABLE = "${var.project_name}-${var.stage}-connections"
     }
   }
 
@@ -84,7 +84,7 @@ resource "aws_lambda_function" "disconnect" {
 
   environment {
     variables = {
-      CONNECTIONS_TABLE = var.connections_table
+      CONNECTIONS_TABLE = "${var.project_name}-${var.stage}-connections"
     }
   }
 
@@ -107,7 +107,7 @@ resource "aws_lambda_function" "message" {
 
   environment {
     variables = {
-      CONNECTIONS_TABLE = var.connections_table
+      CONNECTIONS_TABLE = "${var.project_name}-${var.stage}-connections"
       EVENT_BUS_NAME    = var.event_bus_name
       EVENT_SOURCE      = var.event_source
     }
