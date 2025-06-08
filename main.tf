@@ -127,7 +127,7 @@ module "iam" {
   prefix            = "${var.prefix}-${var.stage}"
   audio_bucket_name = aws_s3_bucket.audio_storage.id
   event_bus_arn     = module.eventbridge.event_bus_arn
-  connections_table = var.connections_table
+  project_name      = var.project_name
   environment       = var.environment
   stage             = var.stage
 
@@ -143,7 +143,6 @@ module "lambda" {
   prefix                    = "${var.prefix}-${var.stage}"
   lambda_functions          = var.lambda_functions
   audio_bucket_name         = aws_s3_bucket.audio_storage.id
-  connections_table         = "${var.connections_table}-${var.stage}"
   audio_processing_rule_arn = module.eventbridge.audio_processing_rule_arn
   audio_validation_rule_arn = module.eventbridge.audio_validation_rule_arn
   lambda_role_arn           = module.iam.lambda_role_arn
@@ -153,6 +152,7 @@ module "lambda" {
   api_gateway_execution_arn = module.api_gateway.execution_arn
   environment               = var.environment
   stage                     = var.stage
+  project_name              = var.project_name
 
   depends_on = [
     aws_s3_bucket.audio_storage,

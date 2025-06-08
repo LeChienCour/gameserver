@@ -171,12 +171,6 @@ variable "audio_bucket_name" {
   default     = "gameserver-audio-storage"
 }
 
-variable "connections_table" {
-  description = "Name of the DynamoDB table for WebSocket connections"
-  type        = string
-  default     = "gameserver-connections"
-}
-
 # VPC and Network Configuration
 variable "availability_zones" {
   description = "Availability zones"
