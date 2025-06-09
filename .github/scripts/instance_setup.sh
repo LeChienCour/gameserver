@@ -79,41 +79,28 @@ echo "Installing NeoForge..."
 cd /opt/minecraft/server
 
 # Check if NeoForge is already installed
-NEOFORGE_JAR="/opt/minecraft/server/libraries/net/neoforged/neoforge/21.4.136/neoforge-21.4.136-server.jar"
-if [ -f "$NEOFORGE_JAR" ] && [ -L "/opt/minecraft/server/neoforge-21.4.136.jar" ]; then
+NEOFORGE_JAR="/opt/minecraft/server/neoforge-21.4.136.jar"
+if [ -f "$NEOFORGE_JAR" ]; then
     echo "✅ NeoForge is already installed"
 else
-    # Ensure proper permissions and create necessary directories
-    echo "Setting up directories and permissions..."
-    sudo mkdir -p /opt/minecraft/server/libraries/net/neoforged/neoforge/21.4.136
-    sudo mkdir -p /opt/minecraft/server/libraries/net/neoforged/neoform/1.21.4-20241203.161809
-    sudo chown -R ec2-user:ec2-user /opt/minecraft/server
-    sudo chmod -R 755 /opt/minecraft/server
+    # Download Minecraft server and NeoForge installer
+    echo "Downloading Minecraft server and NeoForge installer..."
+    sudo -u ec2-user wget https://piston-data.mojang.com/v1/objects/8dd1a28015f51b1803213892b50b7b4fc76e594d/server.jar
+    sudo -u ec2-user wget https://maven.neoforged.net/releases/net/neoforged/neoforge/21.4.136/neoforge-21.4.136-installer.jar
 
-    # Download NeoForge installer and universal JAR
-    echo "Downloading NeoForge files..."
-    sudo -u ec2-user wget -v "https://maven.neoforged.net/releases/net/neoforged/neoforge/21.4.136/neoforge-21.4.136-universal.jar"
+    # Install NeoForge
+    echo "Installing NeoForge..."
+    sudo -u ec2-user java -jar neoforge-21.4.136-installer.jar --installServer
 
-    # Verify download
-    if [ ! -f "neoforge-21.4.136-universal.jar" ]; then
-        echo "Failed to download NeoForge universal JAR"
+    # Clean up installer and server jar
+    sudo -u ec2-user rm neoforge-21.4.136-installer.jar server.jar
+
+    # Verify installation
+    if [ ! -f "$NEOFORGE_JAR" ]; then
+        echo "::error::Failed to install NeoForge"
         exit 1
     fi
-
-    # Create symlink to server JAR
-    echo "Creating symlink to server JAR..."
-    sudo ln -sf "neoforge-21.4.136-universal.jar" "server.jar"
-
-    # Verify symlink was created
-    if [ ! -L "server.jar" ]; then
-        echo "Failed to create symlink to NeoForge server JAR"
-        exit 1
-    fi
-
     echo "✅ NeoForge setup completed"
-
-    # Clean up installer
-    sudo -u ec2-user rm -f neoforge-21.4.136-universal.jar
 fi
 
 # Accept EULA and create basic server configuration
