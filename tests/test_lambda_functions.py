@@ -348,5 +348,57 @@ class TestValidateAudioLambda(unittest.TestCase):
         )
 
 
+class TestAuthorizerLambda(unittest.TestCase):
+    """Tests for functions/authorizer/lambda_function.py."""
+
+    @patch.dict(os.environ, {"EXPECTED_API_KEY": "secret-api-key-123"})
+    def testAuthorizeAllowValidHeader(self) -> None:
+        """Verify valid x-api-key header returns an Allow IAM policy."""
+        authMod = loadLambdaModule("authorizer")
+        event = {
+            "methodArn": "arn:aws:execute-api:us-east-1:123456789012:api-id/dev/$connect",
+            "headers": {"X-Api-Key": "secret-api-key-123"},
+        }
+        policy = authMod.lambda_handler(event, None)
+        statement = policy["policyDocument"]["Statement"][0]
+        self.assertEqual(statement["Effect"], "Allow")
+        self.assertEqual(policy["principalId"], "voice-chat-client")
+
+    @patch.dict(os.environ, {"EXPECTED_API_KEY": "secret-api-key-123"})
+    def testAuthorizeRejectInvalidKey(self) -> None:
+        """Verify invalid x-api-key raises PermissionError (Unauthorized)."""
+        authMod = loadLambdaModule("authorizer")
+        event = {
+            "methodArn": "arn:aws:execute-api:us-east-1:123456789012:api-id/dev/$connect",
+            "headers": {"x-api-key": "wrong-key"},
+        }
+        with self.assertRaises(PermissionError):
+            authMod.lambda_handler(event, None)
+
+    def testAuthorizeFetchesFromSsmAndCaches(self) -> None:
+        """Verify SSM parameter lookup and caching when EXPECTED_API_KEY env is unset."""
+        with patch.dict(os.environ, {"EXPECTED_API_KEY": ""}, clear=False):
+            authMod = loadLambdaModule("authorizer")
+            mockSsm = MagicMock()
+            mockSsm.get_parameter.return_value = {
+                "Parameter": {"Value": "ssm-stored-key"}
+            }
+            with patch.object(authMod, "getSsmClient", return_value=mockSsm):
+                event = {
+                    "methodArn": "arn:aws:execute-api:us-east-1:123456789012:api-id/dev/$connect",
+                    "queryStringParameters": {"apiKey": "ssm-stored-key"},
+                }
+                policy1 = authMod.lambda_handler(event, None)
+                policy2 = authMod.lambda_handler(event, None)
+
+            self.assertEqual(
+                policy1["policyDocument"]["Statement"][0]["Effect"], "Allow"
+            )
+            self.assertEqual(
+                policy2["policyDocument"]["Statement"][0]["Effect"], "Allow"
+            )
+            mockSsm.get_parameter.assert_called_once()
+
+
 if __name__ == "__main__":
     unittest.main()

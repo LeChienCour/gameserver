@@ -1,4 +1,23 @@
 # Audio Processing Lambda Functions
+resource "aws_cloudwatch_log_group" "lambda_logs" {
+  for_each = toset([
+    "${var.prefix}-process-audio",
+    "${var.prefix}-validate-audio",
+    "${var.prefix}-connect",
+    "${var.prefix}-disconnect",
+    "${var.prefix}-message",
+    "${var.prefix}-authorizer"
+  ])
+
+  name              = "/aws/lambda/${each.value}"
+  retention_in_days = var.log_retention_days
+
+  tags = {
+    Environment = var.environment
+    Stage       = var.stage
+  }
+}
+
 resource "aws_lambda_function" "process_audio" {
   filename         = var.lambda_functions.process_audio
   source_code_hash = fileexists(var.lambda_functions.process_audio) ? filebase64sha256(var.lambda_functions.process_audio) : null
@@ -130,6 +149,31 @@ resource "aws_lambda_function" "message" {
   }
 }
 
+resource "aws_lambda_function" "authorizer" {
+  filename         = lookup(var.lambda_functions, "authorizer", "lambda/authorizer.zip")
+  source_code_hash = fileexists(lookup(var.lambda_functions, "authorizer", "lambda/authorizer.zip")) ? filebase64sha256(lookup(var.lambda_functions, "authorizer", "lambda/authorizer.zip")) : null
+  function_name    = "${var.prefix}-authorizer"
+  role             = var.lambda_role_arn
+  handler          = "lambda_function.lambda_handler"
+  runtime          = var.lambda_runtime
+  timeout          = var.websocket_timeout
+  memory_size      = var.websocket_memory
+
+  environment {
+    variables = {
+      STAGE                 = var.stage
+      API_KEY_SSM_PARAMETER = "/game-server/${var.stage}/websocket/api-key"
+    }
+  }
+
+  tags = {
+    Name        = "${var.prefix}-authorizer"
+    Environment = var.environment
+    Service     = "WebSocket"
+    Stage       = var.stage
+  }
+}
+
 # Lambda Permissions for EventBridge Integration
 resource "aws_lambda_permission" "process_audio" {
   statement_id  = "AllowEventBridgeInvoke"
@@ -170,4 +214,12 @@ resource "aws_lambda_permission" "message" {
   function_name = aws_lambda_function.message.function_name
   principal     = "apigateway.amazonaws.com"
   source_arn    = "${var.api_gateway_execution_arn}/*/*"
+}
+
+resource "aws_lambda_permission" "authorizer" {
+  statement_id  = "AllowAPIGatewayAuthorizerInvoke"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.authorizer.function_name
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "${var.api_gateway_execution_arn}/authorizers/*"
 }

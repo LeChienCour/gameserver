@@ -62,9 +62,11 @@ module "api_gateway" {
   environment         = var.environment
 
   # Lambda ARNs
-  lambda_connect_arn    = module.lambda.lambda_functions["connect"]
-  lambda_disconnect_arn = module.lambda.lambda_functions["disconnect"]
-  lambda_message_arn    = module.lambda.lambda_functions["message"]
+  lambda_connect_arn           = module.lambda.lambda_functions["connect"]
+  lambda_disconnect_arn        = module.lambda.lambda_functions["disconnect"]
+  lambda_message_arn           = module.lambda.lambda_functions["message"]
+  lambda_authorizer_invoke_arn = module.lambda.authorizer_invoke_arn
+  enable_custom_authorizer     = var.enable_custom_authorizer
 
   depends_on = [
     module.vpc
@@ -178,11 +180,17 @@ module "lambda" {
     data.archive_file.disconnect_function,
     data.archive_file.message_function,
     data.archive_file.process_audio_function,
-    data.archive_file.validate_audio_function
+    data.archive_file.validate_audio_function,
+    data.archive_file.authorizer_function
   ]
 }
 
 # Lambda Deployment Packages
+data "archive_file" "authorizer_function" {
+  type        = "zip"
+  source_dir  = "${path.module}/functions/authorizer"
+  output_path = "${path.module}/lambda/authorizer.zip"
+}
 data "archive_file" "connect_function" {
   type        = "zip"
   source_dir  = "${path.module}/functions/connect"

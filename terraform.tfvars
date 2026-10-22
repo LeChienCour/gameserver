@@ -49,8 +49,10 @@ lambda_functions = {
   connect        = "lambda/connect.zip"
   disconnect     = "lambda/disconnect.zip"
   message        = "lambda/message.zip"
+  authorizer     = "lambda/authorizer.zip"
 }
 
 # Feature Flags
-enable_echo_mode        = true
-enable_direct_broadcast = true
+enable_echo_mode         = true
+enable_direct_broadcast  = true
+enable_custom_authorizer = false

@@ -156,6 +156,10 @@ output "lambda_functions" {
     message = {
       name = module.lambda.lambda_function_names["message"]
     }
+    authorizer = {
+      arn  = module.lambda.authorizer_function_arn
+      name = module.lambda.lambda_function_names["authorizer"]
+    }
   }
 }
 

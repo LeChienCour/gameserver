@@ -118,3 +118,9 @@ variable "enable_direct_broadcast" {
   type        = bool
   default     = false
 }
+
+variable "log_retention_days" {
+  description = "Number of days to retain Lambda CloudWatch logs"
+  type        = number
+  default     = 30
+}

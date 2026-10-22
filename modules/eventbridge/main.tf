@@ -50,12 +50,28 @@ resource "aws_cloudwatch_event_rule" "audio_processing_rule" {
   })
 }
 
+# Create a Dead Letter Queue (DLQ) for failed EventBridge rule invocations
+resource "aws_sqs_queue" "event_dlq" {
+  name                      = "${var.prefix}-event-dlq"
+  message_retention_seconds = 1209600 # 14 days
+  sqs_managed_sse_enabled   = true
+}
+
 # Target for audio processing rule
 resource "aws_cloudwatch_event_target" "audio_processing_target" {
   rule           = aws_cloudwatch_event_rule.audio_processing_rule.name
   event_bus_name = aws_cloudwatch_event_bus.game_event_bus.name
   target_id      = "${var.prefix}-process-audio-target"
   arn            = var.process_audio_function_arn
+
+  retry_policy {
+    maximum_event_age_in_seconds = 60
+    maximum_retry_attempts       = 2
+  }
+
+  dead_letter_config {
+    arn = aws_sqs_queue.event_dlq.arn
+  }
 }
 
 resource "aws_cloudwatch_event_rule" "audio_validation_rule" {
@@ -88,4 +104,13 @@ resource "aws_cloudwatch_event_target" "audio_validation_target" {
   event_bus_name = aws_cloudwatch_event_bus.game_event_bus.name
   target_id      = "${var.prefix}-validate-audio-target"
   arn            = var.validate_audio_function_arn
+
+  retry_policy {
+    maximum_event_age_in_seconds = 60
+    maximum_retry_attempts       = 2
+  }
+
+  dead_letter_config {
+    arn = aws_sqs_queue.event_dlq.arn
+  }
 } 

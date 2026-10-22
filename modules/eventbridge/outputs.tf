@@ -41,4 +41,9 @@ output "audio_processing_rule_arn" {
 output "audio_validation_rule_arn" {
   description = "ARN of the audio validation rule"
   value       = aws_cloudwatch_event_rule.audio_validation_rule.arn
+}
+
+output "event_dlq_arn" {
+  description = "ARN of the SQS Dead Letter Queue for failed EventBridge deliveries"
+  value       = aws_sqs_queue.event_dlq.arn
 } 

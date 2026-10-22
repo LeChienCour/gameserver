@@ -111,10 +111,21 @@ resource "aws_api_gateway_account" "websocket" {
 # These resources define the routing and integration of WebSocket messages with Lambda functions
 
 # WebSocket Routes
+resource "aws_apigatewayv2_authorizer" "websocket" {
+  count            = var.enable_custom_authorizer && var.lambda_authorizer_invoke_arn != null ? 1 : 0
+  api_id           = aws_apigatewayv2_api.websocket.id
+  authorizer_type  = "REQUEST"
+  authorizer_uri   = var.lambda_authorizer_invoke_arn
+  identity_sources = ["route.request.header.x-api-key"]
+  name             = "${var.prefix}-ws-authorizer"
+}
+
 resource "aws_apigatewayv2_route" "connect" {
-  api_id    = aws_apigatewayv2_api.websocket.id
-  route_key = "$connect"
-  target    = "integrations/${aws_apigatewayv2_integration.connect.id}"
+  api_id             = aws_apigatewayv2_api.websocket.id
+  route_key          = "$connect"
+  target             = "integrations/${aws_apigatewayv2_integration.connect.id}"
+  authorization_type = var.enable_custom_authorizer && var.lambda_authorizer_invoke_arn != null ? "CUSTOM" : "NONE"
+  authorizer_id      = var.enable_custom_authorizer && var.lambda_authorizer_invoke_arn != null ? aws_apigatewayv2_authorizer.websocket[0].id : null
 }
 
 resource "aws_apigatewayv2_route" "disconnect" {
