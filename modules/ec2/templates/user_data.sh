@@ -1,77 +1,83 @@
-#!/bin/bash
-set -e
+#!/usr/bin/env bash
+# ==============================================================================
+# Script Name: user_data.sh
+# Description: Bootstrap script for Minecraft NeoForge Server & CloudWatch Agent
+# ==============================================================================
+set -euo pipefail
 
-# Check if running as root
-if [ "$EUID" -ne 0 ]; then
-  echo "Not running as root. Re-executing with sudo..."
-  exec sudo -E bash "$0" "$@"
-fi
+readonly MINECRAFT_DIR="/opt/minecraft"
+readonly SERVER_DIR="/opt/minecraft/server"
+readonly LOG_FILE="/var/log/minecraft_bootstrap.log"
+readonly GAME_PORT="${game_port}"
+readonly STAGE="${stage}"
+readonly SERVER_MEMORY="${server_memory}"
+readonly NEOFORGE_VERSION="21.4.136"
 
-echo "Starting instance setup..."
+# Redirect stdout and stderr to log file and console
+exec > >(tee -a "$LOG_FILE") 2>&1
 
-# Update system and install required packages
-echo "Updating system and installing required packages..."
-sudo yum update -y
-sudo yum install -y java-21-amazon-corretto-headless
+cleanupOnExit() {
+  local exitCode=$?
+  if [ "$exitCode" -ne 0 ]; then
+    echo "[ERROR] Bootstrap failed with exit code $exitCode" >&2
+  fi
+  rm -f "/tmp/neoforge-${NEOFORGE_VERSION}-installer.jar"
+}
+trap cleanupOnExit EXIT
 
-# Create Minecraft directory structure
-echo "Creating Minecraft directory structure..."
-sudo mkdir -p /opt/minecraft/{server,mods,config,logs}
+ensureRoot() {
+  if [ "$(id -u)" -ne 0 ]; then
+    echo "Re-executing script with sudo..."
+    exec sudo -E bash "$0" "$@"
+  fi
+}
 
-# Set permissions
-echo "Setting permissions..."
-sudo chown -R ec2-user:ec2-user /opt/minecraft
-sudo chmod -R 755 /opt/minecraft
+installPackages() {
+  echo "Installing system packages and Java 21 (Amazon Corretto)..."
+  if command -v dnf >/dev/null 2>&1; then
+    dnf update -y
+    dnf install -y wget jq amazon-cloudwatch-agent java-21-amazon-corretto-headless
+  else
+    yum update -y
+    yum install -y wget jq amazon-cloudwatch-agent java-21-amazon-corretto-headless
+  fi
+}
 
-# Set up NeoForge installation
-echo "Setting up NeoForge installation..."
-cd /opt/minecraft/server
+setupDirectories() {
+  echo "Creating Minecraft directory structure at $MINECRAFT_DIR..."
+  mkdir -p "$MINECRAFT_DIR"/{server,mods,config,logs}
+  chown -R ec2-user:ec2-user "$MINECRAFT_DIR"
+  chmod -R 755 "$MINECRAFT_DIR"
+}
 
-# Download NeoForge installer and universal JAR
-echo "Downloading NeoForge files..."
-sudo -u ec2-user wget -v "https://maven.neoforged.net/releases/net/neoforged/neoforge/21.4.136/neoforge-21.4.136-universal.jar"
+installNeoForge() {
+  echo "Setting up NeoForge $NEOFORGE_VERSION in $SERVER_DIR..."
+  cd "$SERVER_DIR"
 
-# Verify download
-if [ ! -f "neoforge-21.4.136-universal.jar" ]; then
-    echo "Failed to download NeoForge universal JAR"
-    exit 1
-fi
+  local installerUrl="https://maven.neoforged.net/releases/net/neoforged/neoforge/${NEOFORGE_VERSION}/neoforge-${NEOFORGE_VERSION}-installer.jar"
+  local installerPath="/tmp/neoforge-${NEOFORGE_VERSION}-installer.jar"
 
-# Create symlink to server JAR
-echo "Creating symlink to server JAR..."
-sudo ln -sf "neoforge-21.4.136-universal.jar" "server.jar"
+  if [ ! -f "$SERVER_DIR/run.sh" ] && [ ! -f "$SERVER_DIR/server.jar" ]; then
+    sudo -u ec2-user wget -q -O "$installerPath" "$installerUrl"
+    sudo -u ec2-user java -jar "$installerPath" --installServer "$SERVER_DIR"
+  fi
 
-# Verify symlink was created
-if [ ! -L "server.jar" ]; then
-    echo "Failed to create symlink to NeoForge server JAR"
-    exit 1
-fi
-
-echo "✅ NeoForge setup completed"
-
-# Clean up installer
-sudo -u ec2-user rm -f neoforge-21.4.136-universal.jar
-
-# Accept EULA and create basic server configuration
-echo "Configuring server..."
-sudo -u ec2-user bash -c 'echo "eula=true" > eula.txt'
-sudo -u ec2-user bash -c 'cat > server.properties << EOF
-server-port=25565
+  echo "eula=true" > "$SERVER_DIR/eula.txt"
+  cat > "$SERVER_DIR/server.properties" << EOF
+server-port=${GAME_PORT}
 max-players=20
 difficulty=normal
 gamemode=survival
-EOF'
+EOF
 
-# Install CloudWatch agent
-echo "Installing CloudWatch agent..."
-sudo yum install -y amazon-cloudwatch-agent
+  chown -R ec2-user:ec2-user "$SERVER_DIR"
+}
 
-# Create CloudWatch agent config directory
-echo "Creating CloudWatch agent config directory..."
-sudo mkdir -p /opt/aws/amazon-cloudwatch-agent/etc
+configureCloudWatchAgent() {
+  echo "Configuring Amazon CloudWatch Agent..."
+  mkdir -p /opt/aws/amazon-cloudwatch-agent/etc
 
-# Create CloudWatch agent config
-cat << 'EOF' | sudo tee /opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json > /dev/null
+  cat > /opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json << EOF
 {
   "agent": {
     "metrics_collection_interval": 60,
@@ -83,13 +89,13 @@ cat << 'EOF' | sudo tee /opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-a
         "collect_list": [
           {
             "file_path": "/opt/minecraft/logs/latest.log",
-            "log_group_name": "/minecraft/server-logs",
+            "log_group_name": "/minecraft/server/${STAGE}",
             "log_stream_name": "{instance_id}",
             "timezone": "UTC"
           },
           {
             "file_path": "/opt/minecraft/logs/voice-chat.log",
-            "log_group_name": "/minecraft/voice-chat-logs",
+            "log_group_name": "/minecraft/voice-chat/${STAGE}",
             "log_stream_name": "{instance_id}",
             "timezone": "UTC"
           }
@@ -100,34 +106,51 @@ cat << 'EOF' | sudo tee /opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-a
 }
 EOF
 
-# Start CloudWatch agent
-echo "Starting CloudWatch agent..."
-sudo systemctl enable amazon-cloudwatch-agent
-sudo systemctl start amazon-cloudwatch-agent
+  systemctl enable amazon-cloudwatch-agent
+  systemctl restart amazon-cloudwatch-agent
+}
 
-# Create Minecraft server service
-echo "Creating Minecraft server service..."
-cat << 'EOF' | sudo tee /etc/systemd/system/minecraft.service > /dev/null
+configureSystemdService() {
+  echo "Creating systemd unit for Minecraft Server..."
+  local execStartCmd="/usr/bin/java -Xmx${SERVER_MEMORY}G -Xms${SERVER_MEMORY}G -jar server.jar nogui"
+  if [ -f "$SERVER_DIR/run.sh" ]; then
+    chmod +x "$SERVER_DIR/run.sh"
+    echo "-Xmx${SERVER_MEMORY}G -Xms${SERVER_MEMORY}G" > "$SERVER_DIR/user_jvm_args.txt"
+    chown ec2-user:ec2-user "$SERVER_DIR/user_jvm_args.txt"
+    execStartCmd="/bin/bash $SERVER_DIR/run.sh nogui"
+  fi
+
+  cat > /etc/systemd/system/minecraft.service << EOF
 [Unit]
-Description=Minecraft Server
-After=network.target
+Description=Minecraft NeoForge Server (${STAGE})
+After=network-online.target
+Wants=network-online.target
 
 [Service]
 Type=simple
 User=ec2-user
-WorkingDirectory=/opt/minecraft/server
-ExecStart=/usr/bin/java -Xmx2G -Xms2G -jar server.jar nogui
+WorkingDirectory=${SERVER_DIR}
+ExecStart=${execStartCmd}
 Restart=on-failure
-RestartSec=5
+RestartSec=10
 
 [Install]
 WantedBy=multi-user.target
 EOF
 
-# Enable and start service
-echo "Enabling and starting Minecraft service..."
-sudo systemctl daemon-reload
-sudo systemctl enable minecraft
-sudo systemctl start minecraft
+  systemctl daemon-reload
+  systemctl enable minecraft
+  systemctl start minecraft
+}
 
-echo "Instance setup completed successfully!" 
+main() {
+  ensureRoot "$@"
+  installPackages
+  setupDirectories
+  installNeoForge
+  configureCloudWatchAgent
+  configureSystemdService
+  echo "Instance setup completed successfully!"
+}
+
+main "$@"

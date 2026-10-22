@@ -14,10 +14,12 @@ on:
     branches:
       - main
     paths:
-      - '.github/scripts/**'      # Deployment scripts
-      - '.github/workflows/pr-checks.yaml'  # This workflow
-      - 'terraform/**'            # Infrastructure code
-      - 'userdata.sh'            # Instance initialization
+      - '.github/scripts/**'
+      - '.github/workflows/pr-checks.yaml'
+      - '**.tf'
+      - '**.tfvars'
+      - 'functions/**'
+      - 'modules/**'
   # Allow manual triggers with stage selection
   workflow_dispatch:
     inputs:
@@ -126,6 +128,11 @@ jobs:
           
           echo "Generated backend configuration:"
           cat backend.hcl
+
+      - name: Run Python Lambda Unit Tests
+        run: |
+          echo "Running Python unit tests for Lambda functions..."
+          python3 -m unittest discover -s tests -p "test_*.py" -v
 
       - name: Initialize Terraform
         id: init
@@ -394,8 +401,8 @@ jobs:
           # Copy setup script to instance
           scp -i ~/.ssh/game_server_key -o StrictHostKeyChecking=no .github/scripts/instance_setup.sh ec2-user@$INSTANCE_IP:~/setup.sh
           
-          # Execute setup script on instance with AWS credentials
-          ssh -i ~/.ssh/game_server_key -o StrictHostKeyChecking=no ec2-user@$INSTANCE_IP "chmod +x ~/setup.sh && sudo AWS_ACCESS_KEY_ID=${{ secrets.AWS_ACCESS_KEY_ID }} AWS_SECRET_ACCESS_KEY=${{ secrets.AWS_SECRET_ACCESS_KEY }} AWS_REGION=${{ secrets.AWS_REGION }} ~/setup.sh"
+          # Execute setup script on instance using the attached IAM Instance Profile (no static AWS keys)
+          ssh -i ~/.ssh/game_server_key -o StrictHostKeyChecking=no ec2-user@$INSTANCE_IP "chmod +x ~/setup.sh && sudo STAGE=${{ env.STAGE }} AWS_REGION=${{ secrets.AWS_REGION }} ~/setup.sh"
           
       - name: Copy Mod to Instance
         if: matrix.task == 'mod-build'
@@ -624,6 +631,11 @@ jobs:
           
           echo "Generated backend configuration:"
           cat backend.hcl
+
+      - name: Run Python Lambda Unit Tests
+        run: |
+          echo "Running Python unit tests for Lambda functions..."
+          python3 -m unittest discover -s tests -p "test_*.py" -v
 
       - name: Initialize Terraform
         run: |
