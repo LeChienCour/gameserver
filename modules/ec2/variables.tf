@@ -92,3 +92,9 @@ variable "java_parameters" {
   type        = string
   default     = ""
 }
+
+variable "audio_bucket_name" {
+  description = "Name of the S3 bucket for world backups and mod artifacts"
+  type        = string
+  default     = ""
+}

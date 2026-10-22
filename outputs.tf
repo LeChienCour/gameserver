@@ -230,3 +230,14 @@ output "cognito_app_client_id" {
   description = "The ID of the Cognito User Pool Client"
   value       = module.cognito.user_pool_client_id
 }
+
+# Monitoring Outputs
+output "observability_dashboard_name" {
+  description = "Name of the CloudWatch observability dashboard"
+  value       = module.monitoring.dashboard_name
+}
+
+output "cloudwatch_alarm_arns" {
+  description = "Map of CloudWatch alarm ARNs"
+  value       = module.monitoring.alarm_arns
+}

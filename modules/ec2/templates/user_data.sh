@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # ==============================================================================
 # Script Name: user_data.sh
-# Description: Bootstrap script for Minecraft NeoForge Server & CloudWatch Agent
+# Description: Bootstrap script for Minecraft NeoForge Server, CloudWatch Agent,
+#              and automated S3 world backup timer.
 # ==============================================================================
 set -euo pipefail
 
@@ -11,9 +12,9 @@ readonly LOG_FILE="/var/log/minecraft_bootstrap.log"
 readonly GAME_PORT="${game_port}"
 readonly STAGE="${stage}"
 readonly SERVER_MEMORY="${server_memory}"
+readonly AUDIO_BUCKET_NAME="${audio_bucket_name}"
 readonly NEOFORGE_VERSION="21.4.136"
 
-# Redirect stdout and stderr to log file and console
 exec > >(tee -a "$LOG_FILE") 2>&1
 
 cleanupOnExit() {
@@ -36,16 +37,16 @@ installPackages() {
   echo "Installing system packages and Java 21 (Amazon Corretto)..."
   if command -v dnf >/dev/null 2>&1; then
     dnf update -y
-    dnf install -y wget jq amazon-cloudwatch-agent java-21-amazon-corretto-headless
+    dnf install -y wget jq tar gzip awscli amazon-cloudwatch-agent java-21-amazon-corretto-headless
   else
     yum update -y
-    yum install -y wget jq amazon-cloudwatch-agent java-21-amazon-corretto-headless
+    yum install -y wget jq tar gzip awscli amazon-cloudwatch-agent java-21-amazon-corretto-headless
   fi
 }
 
 setupDirectories() {
   echo "Creating Minecraft directory structure at $MINECRAFT_DIR..."
-  mkdir -p "$MINECRAFT_DIR"/{server,mods,config,logs}
+  mkdir -p "$MINECRAFT_DIR"/{server,mods,config,logs,backups}
   chown -R ec2-user:ec2-user "$MINECRAFT_DIR"
   chmod -R 755 "$MINECRAFT_DIR"
 }
@@ -71,6 +72,63 @@ gamemode=survival
 EOF
 
   chown -R ec2-user:ec2-user "$SERVER_DIR"
+}
+
+configureWorldBackupTimer() {
+  echo "Configuring automated S3 world backup script and systemd timer..."
+  cat > /usr/local/bin/backup_minecraft_world.sh << 'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+readonly SERVER_DIR="/opt/minecraft/server"
+readonly BACKUP_DIR="/opt/minecraft/backups"
+readonly BUCKET_NAME="${1:-}"
+readonly STAGE_NAME="${2:-dev}"
+
+if [ ! -d "${SERVER_DIR}/world" ]; then
+  echo "No world directory found yet; skipping backup."
+  exit 0
+fi
+
+timestamp=$(date -u +"%Y%m%d_%H%M%S")
+archivePath="${BACKUP_DIR}/world_${STAGE_NAME}_${timestamp}.tar.gz"
+
+tar -czf "$archivePath" -C "$SERVER_DIR" world
+
+if [ -n "$BUCKET_NAME" ]; then
+  aws s3 cp "$archivePath" "s3://${BUCKET_NAME}/backups/${STAGE_NAME}/world_${timestamp}.tar.gz"
+fi
+
+# Retain only the 3 most recent local archives
+find "$BACKUP_DIR" -name "world_*.tar.gz" -type f -mtime +2 -delete || true
+EOF
+  chmod +x /usr/local/bin/backup_minecraft_world.sh
+
+  cat > /etc/systemd/system/minecraft-backup.service << EOF
+[Unit]
+Description=Minecraft World Backup to S3 (${STAGE})
+
+[Service]
+Type=oneshot
+User=ec2-user
+ExecStart=/usr/local/bin/backup_minecraft_world.sh "${AUDIO_BUCKET_NAME}" "${STAGE}"
+EOF
+
+  cat > /etc/systemd/system/minecraft-backup.timer << 'EOF'
+[Unit]
+Description=Run Minecraft World Backup every 6 hours
+
+[Timer]
+OnCalendar=*-*-* 00/6:00:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+EOF
+
+  systemctl daemon-reload
+  systemctl enable minecraft-backup.timer
+  systemctl start minecraft-backup.timer
 }
 
 configureCloudWatchAgent() {
@@ -148,6 +206,7 @@ main() {
   installPackages
   setupDirectories
   installNeoForge
+  configureWorldBackupTimer
   configureCloudWatchAgent
   configureSystemdService
   echo "Instance setup completed successfully!"

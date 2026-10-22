@@ -30,13 +30,16 @@ resource "aws_security_group" "game_server" {
     cidr_blocks = var.allowed_game_ips
   }
 
-  # SSH access
-  ingress {
-    description = "SSH access"
-    from_port   = 22
-    to_port     = 22
-    protocol    = "tcp"
-    cidr_blocks = [var.ssh_cidr]
+  # SSH access (optional; SSM Session Manager is preferred)
+  dynamic "ingress" {
+    for_each = var.ssh_cidr != "" ? [var.ssh_cidr] : []
+    content {
+      description = "SSH access"
+      from_port   = 22
+      to_port     = 22
+      protocol    = "tcp"
+      cidr_blocks = [ingress.value]
+    }
   }
 
   # Allow all outbound traffic

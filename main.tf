@@ -119,6 +119,7 @@ module "ec2_game_server" {
   key_name            = data.aws_ssm_parameter.key_pair.value
   stage               = var.stage
   environment         = var.environment
+  audio_bucket_name   = aws_s3_bucket.audio_storage.id
 }
 
 # EventBridge Module
@@ -191,6 +192,7 @@ data "archive_file" "authorizer_function" {
   source_dir  = "${path.module}/functions/authorizer"
   output_path = "${path.module}/lambda/authorizer.zip"
 }
+
 data "archive_file" "connect_function" {
   type        = "zip"
   source_dir  = "${path.module}/functions/connect"
@@ -317,4 +319,18 @@ module "ssm" {
   websocket_api_id    = module.api_gateway.api_id
   websocket_stage_url = module.api_gateway.api_endpoint
   websocket_api_key   = module.api_gateway.api_key
+}
+
+# Monitoring & Observability Module
+module "monitoring" {
+  source = "./modules/monitoring"
+
+  prefix                = "${var.prefix}-${var.stage}"
+  stage                 = var.stage
+  environment           = var.environment
+  region                = var.region
+  instance_id           = module.ec2_game_server.instance_id
+  websocket_api_id      = module.api_gateway.api_id
+  event_dlq_name        = module.eventbridge.event_dlq_name
+  lambda_function_names = module.lambda.lambda_function_names
 }

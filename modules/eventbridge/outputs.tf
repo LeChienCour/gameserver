@@ -46,4 +46,9 @@ output "audio_validation_rule_arn" {
 output "event_dlq_arn" {
   description = "ARN of the SQS Dead Letter Queue for failed EventBridge deliveries"
   value       = aws_sqs_queue.event_dlq.arn
+}
+
+output "event_dlq_name" {
+  description = "Name of the SQS Dead Letter Queue for failed EventBridge deliveries"
+  value       = aws_sqs_queue.event_dlq.name
 } 

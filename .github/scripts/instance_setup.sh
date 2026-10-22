@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # ==============================================================================
 # Script Name: instance_setup.sh
-# Description: Idempotent setup script for Minecraft NeoForge Server on EC2
+# Description: Idempotent setup script for Minecraft NeoForge Server on EC2.
 #              Relies on the attached EC2 IAM Instance Profile (no static keys).
 # ==============================================================================
 set -euo pipefail
@@ -60,7 +60,7 @@ installPackagesAndJava() {
 
 setupDirectories() {
   echo "Creating Minecraft directory structure..."
-  mkdir -p "${MINECRAFT_DIR}"/{server,mods,config,logs}
+  mkdir -p "${MINECRAFT_DIR}"/{server,mods,config,logs,backups}
   chown -R ec2-user:ec2-user "${MINECRAFT_DIR}"
   chmod -R 755 "${MINECRAFT_DIR}"
 }

@@ -64,6 +64,19 @@ resource "aws_iam_role_policy" "game_server_policy" {
           "logs:PutLogEvents"
         ]
         Resource = "arn:aws:logs:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:log-group:/minecraft/*"
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "s3:GetObject",
+          "s3:PutObject",
+          "s3:ListBucket"
+        ]
+        Resource = var.audio_bucket_name != "" ? [
+          "arn:aws:s3:::${var.audio_bucket_name}",
+          "arn:aws:s3:::${var.audio_bucket_name}/backups/*",
+          "arn:aws:s3:::${var.audio_bucket_name}/artifacts/*"
+        ] : ["arn:aws:s3:::none"]
       }
     ]
   })
@@ -112,6 +125,7 @@ resource "aws_instance" "game_server" {
     environment         = var.environment
     server_memory       = var.server_memory
     neoforge_version    = var.neoforge_version
+    audio_bucket_name   = var.audio_bucket_name
   })
 
   metadata_options {

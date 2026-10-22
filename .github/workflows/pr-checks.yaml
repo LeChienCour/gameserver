@@ -37,7 +37,40 @@ on:
 permissions: read-all
 
 jobs:
-  # First job: Deploy infrastructure using Terraform
+  # Fast CI job: Unit tests, Terraform fmt, and Bash syntax checks (always runs on PRs)
+  unit_and_lint_checks:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4.1.1
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install boto3 for unit tests
+        run: pip install boto3
+
+      - name: Run Python Lambda Unit Tests
+        run: python3 -m unittest discover -s tests -p "test_*.py" -v
+
+      - name: Validate Bash Scripts Syntax
+        run: |
+          bash -n .github/scripts/deploy.sh
+          bash -n .github/scripts/instance_setup.sh
+          bash -n modules/ec2/templates/user_data.sh
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3.0.0
+        with:
+          terraform_version: 1.12.1
+
+      - name: Check Terraform Formatting
+        run: terraform fmt -check -recursive
+
+  # First deployment job: Deploy infrastructure using Terraform
   terraform_deploy:
     # CD disabled: skips this job and everything that depends on it (build_mod, deploy, cleanup).
     # Remove this line to re-enable infrastructure deployment.

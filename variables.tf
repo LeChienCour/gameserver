@@ -166,9 +166,9 @@ variable "security_group_name" {
 }
 
 variable "ssh_cidr" {
-  description = "CIDR block for SSH access"
+  description = "CIDR block for SSH access (set empty string to disable port 22 and rely strictly on SSM)"
   type        = string
-  default     = "0.0.0.0/0"
+  default     = ""
 }
 
 variable "websocket_port" {
