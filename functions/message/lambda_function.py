@@ -1,185 +1,292 @@
+"""WebSocket message and sendaudio route Lambda handler."""
+
+import base64
 import json
-import boto3
-import os
 import logging
-from datetime import datetime
+import os
+import uuid
+from datetime import datetime, timezone
+from typing import Any, Dict, Optional, Tuple
+
+import boto3
 from botocore.exceptions import ClientError
 
 # Configure logging for CloudWatch
-logger = logging.getLogger()
-logger.setLevel(logging.INFO)
+logger = logging.getLogger(__name__)
+logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
 
-# Initialize DynamoDB resource for storing WebSocket connections
-# The table stores connection IDs and their metadata
-dynamodb = boto3.resource('dynamodb')
-table_name = os.environ.get('CONNECTIONS_TABLE')
-if not table_name:
-    logger.error("CONNECTIONS_TABLE environment variable not set")
+# Environment variables (UPPER_CASE)
+CONNECTIONS_TABLE_NAME = os.environ.get("CONNECTIONS_TABLE", "")
+EVENT_BUS_NAME = os.environ.get("EVENT_BUS_NAME", "")
+EVENT_SOURCE = os.environ.get("EVENT_SOURCE", "voice-chat")
+DIRECT_BROADCAST = os.environ.get("DIRECT_BROADCAST", "false").lower() == "true"
+ECHO_MODE = os.environ.get("ECHO_MODE", "false").lower() == "true"
+MAX_AUDIO_BYTES = int(os.environ.get("MAX_AUDIO_BYTES", str(128 * 1024)))
 
-table = None
-if table_name:
-    table = dynamodb.Table(table_name)
+_dynamodbResource = None
+_eventsClient = None
+_apigwClients: Dict[str, Any] = {}
 
-def get_api_gateway_management_client(event):
-    """
-    Creates an API Gateway Management API client for WebSocket communication.
-    
-    This client is used to send messages back to connected clients through
-    their WebSocket connections. The endpoint URL is constructed from the
-    API Gateway domain and stage provided in the event context.
-    
-    Args:
-        event (dict): The Lambda event containing WebSocket connection details
-                     in the requestContext.
-    
-    Returns:
-        boto3.client: API Gateway Management API client, or None if required
-                     information is missing.
-    """
-    domain_name = event.get('requestContext', {}).get('domainName')
-    stage = event.get('requestContext', {}).get('stage')
-    if not domain_name or not stage:
+
+def getDynamodbTable() -> Any:
+    """Return a cached DynamoDB Table resource for WebSocket connections."""
+    global _dynamodbResource
+    tableName = os.environ.get("CONNECTIONS_TABLE", CONNECTIONS_TABLE_NAME)
+    if not tableName:
+        raise ValueError("CONNECTIONS_TABLE environment variable not set")
+    if _dynamodbResource is None:
+        _dynamodbResource = boto3.resource("dynamodb")
+    return _dynamodbResource.Table(tableName)
+
+
+def getEventsClient() -> Any:
+    """Return a cached EventBridge client."""
+    global _eventsClient
+    if _eventsClient is None:
+        _eventsClient = boto3.client("events")
+    return _eventsClient
+
+
+def getApiGatewayManagementClient(event: Dict[str, Any]) -> Optional[Any]:
+    """Create or retrieve a cached API Gateway Management API client for WebSocket communication."""
+    requestContext = event.get("requestContext", {})
+    domainName = requestContext.get("domainName")
+    stage = requestContext.get("stage")
+    if not domainName or not stage:
         return None
-    endpoint_url = f"https://{domain_name}/{stage}"
-    return boto3.client('apigatewaymanagementapi', endpoint_url=endpoint_url)
+    endpointUrl = f"https://{domainName}/{stage}"
+    if endpointUrl not in _apigwClients:
+        _apigwClients[endpointUrl] = boto3.client(
+            "apigatewaymanagementapi", endpoint_url=endpointUrl
+        )
+    return _apigwClients[endpointUrl]
 
-def send_pong_response(apigw_client, connection_id):
-    """
-    Sends a pong response to a client's ping request.
-    
-    This function implements the WebSocket ping/pong mechanism for connection
-    health checks. It sends back a pong message containing the client's
-    connection ID and current timestamp.
-    
-    Args:
-        apigw_client (boto3.client): API Gateway Management API client
-        connection_id (str): The client's WebSocket connection ID
-    
-    Returns:
-        bool: True if pong was sent successfully, False otherwise
-    """
+
+def buildResponse(statusCode: int, body: Any) -> Dict[str, Any]:
+    """Build an API Gateway proxy response dictionary."""
+    serializedBody = body if isinstance(body, str) else json.dumps(body)
+    return {
+        "statusCode": statusCode,
+        "body": serializedBody,
+    }
+
+
+def sendPongResponse(apigwClient: Any, connectionId: str) -> bool:
+    """Send a pong response to a client's ping request."""
     try:
-        response_message = {
-            'action': 'pong',
-            'data': {
-                'connectionId': connection_id,
-                'timestamp': datetime.utcnow().isoformat()
-            }
+        responseMessage = {
+            "action": "pong",
+            "data": {
+                "connectionId": connectionId,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            },
         }
-        apigw_client.post_to_connection(
-            ConnectionId=connection_id,
-            Data=json.dumps(response_message)
+        apigwClient.post_to_connection(
+            ConnectionId=connectionId,
+            Data=json.dumps(responseMessage),
         )
         return True
-    except Exception as e:
-        logger.error(f"Pong error: {str(e)}")
+    except Exception as err:
+        logger.error("Pong error for connection %s: %s", connectionId, err)
         return False
 
-def lambda_handler(event, context):
-    """
-    Main handler for WebSocket messages in the voice chat system.
-    
-    This function processes incoming WebSocket messages and handles different
-    actions:
-    - 'ping': Responds with a pong message for connection health checks
-    - 'sendaudio': Processes audio data and sends it to EventBridge for
-                   further processing and broadcasting
-    
-    The function validates the connection context, parses the message body,
-    and routes the request to the appropriate handler based on the action.
-    
-    Flow for audio messages:
-    1. Validates connection information and message format
-    2. Retrieves all active connections from DynamoDB
-    3. Sends the audio event to EventBridge for processing
-    4. EventBridge triggers the process_audio Lambda
-    
-    Args:
-        event (dict): Lambda event containing WebSocket message details
-        context (LambdaContext): Lambda runtime information
-    
-    Returns:
-        dict: Response object with statusCode and body
-    """
-    # Extract connection information from the WebSocket context
-    request_context = event.get('requestContext', {})
-    source_connection_id = request_context.get('connectionId')
-    domain = request_context.get('domainName')
-    stage = request_context.get('stage')
-    
-    # Validate required connection information
-    if not source_connection_id or not domain or not stage:
-        return {'statusCode': 400, 'body': 'Missing connection information'}
 
-    # Ensure DynamoDB table is properly configured
-    if not table:
-        return {'statusCode': 500, 'body': 'Server configuration error'}
+def validateAudioPayload(audioData: Optional[str]) -> Tuple[bool, str]:
+    """Validate base64 audio payload presence, encoding, and size limits."""
+    if not audioData or not isinstance(audioData, str):
+        return False, "Missing audio data"
+    try:
+        decodedBytes = base64.b64decode(audioData, validate=True)
+    except Exception as err:
+        return False, f"Invalid base64 audio data: {err}"
+
+    if len(decodedBytes) == 0:
+        return False, "Empty audio payload"
+    if len(decodedBytes) > MAX_AUDIO_BYTES:
+        return (
+            False,
+            f"Audio payload exceeds maximum allowed size ({MAX_AUDIO_BYTES} bytes)",
+        )
+    return True, "Valid"
+
+
+def broadcastAudioDirectly(
+    apigwClient: Any,
+    connectionsTable: Any,
+    sourceConnectionId: str,
+    audioData: str,
+    author: str,
+    timestamp: str,
+) -> Dict[str, int]:
+    """Fast-path broadcast of audio directly to active WebSocket connections."""
+    scanResponse = connectionsTable.scan(ProjectionExpression="connectionId")
+    items = scanResponse.get("Items", [])
+    connectionIds = [item["connectionId"] for item in items if "connectionId" in item]
+
+    isEchoMode = os.environ.get("ECHO_MODE", str(ECHO_MODE)).lower() == "true"
+    if len(connectionIds) == 1 and connectionIds[0] == sourceConnectionId:
+        isEchoMode = True
+
+    outboundPayload = json.dumps(
+        {
+            "action": "audio",
+            "data": {
+                "audio": audioData,
+                "author": author,
+                "timestamp": timestamp,
+                "status": "VALIDATED",
+            },
+        }
+    )
+
+    stats = {"total": len(connectionIds), "sent": 0, "failed": 0, "staleRemoved": 0}
+    for targetConnId in connectionIds:
+        if not isEchoMode and targetConnId == sourceConnectionId:
+            continue
+        try:
+            apigwClient.post_to_connection(
+                ConnectionId=targetConnId,
+                Data=outboundPayload,
+            )
+            stats["sent"] += 1
+        except Exception as err:
+            if "GoneException" in str(err):
+                try:
+                    connectionsTable.delete_item(Key={"connectionId": targetConnId})
+                    stats["staleRemoved"] += 1
+                except Exception as delErr:
+                    logger.error(
+                        "Failed to remove stale connection %s: %s", targetConnId, delErr
+                    )
+            else:
+                stats["failed"] += 1
+                logger.error("Failed to broadcast to %s: %s", targetConnId, err)
+
+    return stats
+
+
+def publishAudioEvent(
+    messageBody: Dict[str, Any],
+    websocketContext: Dict[str, str],
+    timestamp: str,
+    eventStatus: str = "PENDING",
+) -> None:
+    """Publish a SendAudioEvent to EventBridge and verify FailedEntryCount."""
+    eventBusName = os.environ.get("EVENT_BUS_NAME", EVENT_BUS_NAME)
+    eventSource = os.environ.get("EVENT_SOURCE", EVENT_SOURCE)
+
+    detailPayload = {
+        "event_id": str(uuid.uuid4()),
+        "status": eventStatus,
+        "message": messageBody,
+        "timestamp": timestamp,
+        "websocket_context": websocketContext,
+    }
+
+    entry: Dict[str, Any] = {
+        "Source": eventSource,
+        "DetailType": "SendAudioEvent",
+        "Detail": json.dumps(detailPayload),
+    }
+    if eventBusName:
+        entry["EventBusName"] = eventBusName
+
+    response = getEventsClient().put_events(Entries=[entry])
+    if response.get("FailedEntryCount", 0) > 0:
+        entries = response.get("Entries", [])
+        raise RuntimeError(f"EventBridge put_events failed: {entries}")
+
+
+def handleMessage(event: Dict[str, Any], context: Any = None) -> Dict[str, Any]:
+    """Route and process incoming WebSocket messages ('ping' and 'sendaudio')."""
+    requestContext = event.get("requestContext", {})
+    sourceConnectionId = requestContext.get("connectionId")
+    domainName = requestContext.get("domainName")
+    stage = requestContext.get("stage")
+
+    if not sourceConnectionId or not domainName or not stage:
+        return buildResponse(400, "Missing connection information")
 
     try:
-        # Parse and validate the message body
-        message_body = json.loads(event.get('body', '{}'))
-        action = message_body.get('action')
+        connectionsTable = getDynamodbTable()
+    except ValueError:
+        return buildResponse(500, "Server configuration error")
 
-        if not action:
-            return {'statusCode': 400, 'body': 'No action specified'}
-
-        # Initialize WebSocket API client for responses
-        apigw_management_client = get_api_gateway_management_client(event)
-        if not apigw_management_client:
-            return {'statusCode': 500, 'body': 'API Gateway client initialization failed'}
-
-        # Handle ping/pong for connection health checks
-        if action == 'ping':
-            if send_pong_response(apigw_management_client, source_connection_id):
-                return {'statusCode': 200, 'body': json.dumps({'message': 'Pong sent'})}
-            return {'statusCode': 500, 'body': json.dumps({'error': 'Pong failed'})}
-
-        # Handle audio message processing
-        if action == 'sendaudio':
-            # Retrieve all active WebSocket connections
-            try:
-                response = table.scan(ProjectionExpression='connectionId')
-                connections = response.get('Items', [])
-            except Exception as e:
-                logger.error(f"DynamoDB error: {str(e)}")
-                return {'statusCode': 500, 'body': 'Database error'}
-
-            # Prepare WebSocket context for audio processing
-            websocket_context = {
-                'domain_name': domain,
-                'stage': stage,
-                'connection_id': source_connection_id
-            }
-            
-            try:
-                # Send audio event to EventBridge for processing
-                event_response = boto3.client('events').put_events(
-                    Entries=[{
-                        'Source': os.environ.get('EVENT_SOURCE', 'voice-chat'),
-                        'DetailType': 'SendAudioEvent',
-                        'Detail': json.dumps({
-                            'status': 'PENDING',
-                            'message': message_body,
-                            'timestamp': datetime.utcnow().isoformat(),
-                            'websocket_context': websocket_context
-                        }),
-                        'EventBusName': os.environ.get('EVENT_BUS_NAME')
-                    }]
-                )
-                logger.info(f"Audio event sent from {source_connection_id}")
-                return {
-                    'statusCode': 200,
-                    'body': json.dumps({'message': 'Audio event sent'})
-                }
-            except Exception as e:
-                logger.error(f"EventBridge error: {str(e)}")
-                return {'statusCode': 500, 'body': 'Event processing failed'}
-        
-        # Return error for unhandled action types
-        return {'statusCode': 400, 'body': json.dumps({'error': f'Unhandled action: {action}'})}
-        
+    try:
+        rawBody = event.get("body") or "{}"
+        messageBody = json.loads(rawBody)
     except json.JSONDecodeError:
-        return {'statusCode': 400, 'body': 'Invalid JSON format'}
-    except Exception as e:
-        logger.error(f"Message error: {str(e)}")
-        return {'statusCode': 500, 'body': 'Message processing failed'}
+        return buildResponse(400, "Invalid JSON format")
+
+    action = messageBody.get("action")
+    if not action:
+        return buildResponse(400, "No action specified")
+
+    apigwClient = getApiGatewayManagementClient(event)
+    if not apigwClient:
+        return buildResponse(500, "API Gateway client initialization failed")
+
+    if action == "ping":
+        if sendPongResponse(apigwClient, sourceConnectionId):
+            return buildResponse(200, {"message": "Pong sent"})
+        return buildResponse(500, {"error": "Pong failed"})
+
+    if action == "sendaudio":
+        audioData = messageBody.get("data")
+        author = messageBody.get("author", "Anonymous")
+
+        isValid, validationMsg = validateAudioPayload(audioData)
+        if not isValid:
+            logger.warning(
+                "Invalid audio payload from %s: %s", sourceConnectionId, validationMsg
+            )
+            return buildResponse(400, {"error": validationMsg})
+
+        timestamp = datetime.now(timezone.utc).isoformat()
+        websocketContext = {
+            "domain_name": domainName,
+            "stage": stage,
+            "connection_id": sourceConnectionId,
+        }
+
+        directBroadcastEnabled = (
+            os.environ.get("DIRECT_BROADCAST", str(DIRECT_BROADCAST)).lower() == "true"
+        )
+
+        try:
+            broadcastStats = None
+            if directBroadcastEnabled:
+                broadcastStats = broadcastAudioDirectly(
+                    apigwClient=apigwClient,
+                    connectionsTable=connectionsTable,
+                    sourceConnectionId=sourceConnectionId,
+                    audioData=audioData,
+                    author=author,
+                    timestamp=timestamp,
+                )
+
+            publishAudioEvent(
+                messageBody=messageBody,
+                websocketContext=websocketContext,
+                timestamp=timestamp,
+                eventStatus="BROADCASTED" if directBroadcastEnabled else "PENDING",
+            )
+            logger.info("Audio event sent from %s", sourceConnectionId)
+
+            responsePayload: Dict[str, Any] = {"message": "Audio event sent"}
+            if broadcastStats is not None:
+                responsePayload["broadcast"] = broadcastStats
+            return buildResponse(200, responsePayload)
+        except ClientError as err:
+            logger.error("AWS ClientError processing sendaudio: %s", err)
+            return buildResponse(500, "Event processing failed")
+        except Exception as err:
+            logger.error("Error processing sendaudio: %s", err)
+            return buildResponse(500, "Event processing failed")
+
+    return buildResponse(400, {"error": f"Unhandled action: {action}"})
+
+
+def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
+    """AWS Lambda entry point for WebSocket messages."""
+    return handleMessage(event, context)

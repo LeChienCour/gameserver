@@ -1,306 +1,292 @@
-import json
+"""Audio validation and WebSocket broadcast Lambda handler."""
+
 import base64
-import os
-import boto3
+import json
 import logging
-from datetime import datetime
+import os
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional, Tuple
+
+import boto3
 
 # Configure logging for CloudWatch
-logger = logging.getLogger()
-logger.setLevel(logging.INFO)
+logger = logging.getLogger(__name__)
+logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
 
-# Initialize AWS service clients
-dynamodb = boto3.client('dynamodb')
-apigatewaymanagementapi = None
+# Environment variables (UPPER_CASE)
+CONNECTIONS_TABLE_NAME = os.environ.get("CONNECTIONS_TABLE", "")
+AUDIO_BUCKET_NAME = os.environ.get("AUDIO_BUCKET", "")
+MIN_AUDIO_BYTES = int(os.environ.get("MIN_AUDIO_BYTES", "1024"))
+MAX_AUDIO_BYTES = int(os.environ.get("MAX_AUDIO_BYTES", str(128 * 1024)))
 
-def get_api_client(endpoint_url):
-    """
-    Creates or retrieves a cached API Gateway Management API client.
-    
-    This function maintains a single client instance for the WebSocket API
-    to optimize performance and resource usage. The client is used to send
-    messages back to connected clients through their WebSocket connections.
-    
-    Args:
-        endpoint_url (str): The WebSocket API endpoint URL
-                          (format: https://{domain}/{stage})
-    
-    Returns:
-        boto3.client: API Gateway Management API client
-    
-    Raises:
-        Exception: If client creation fails
-    """
-    global apigatewaymanagementapi
-    if apigatewaymanagementapi is None:
+_dynamodbClient = None
+_s3Client = None
+_apigwClients: Dict[str, Any] = {}
+
+
+def getDynamodbClient() -> Any:
+    """Return a cached DynamoDB client."""
+    global _dynamodbClient
+    if _dynamodbClient is None:
+        _dynamodbClient = boto3.client("dynamodb")
+    return _dynamodbClient
+
+
+def getS3Client() -> Any:
+    """Return a cached S3 client."""
+    global _s3Client
+    if _s3Client is None:
+        _s3Client = boto3.client("s3")
+    return _s3Client
+
+
+def getApiClient(endpointUrl: str) -> Any:
+    """Create or retrieve a cached API Gateway Management API client keyed by endpointUrl."""
+    if endpointUrl not in _apigwClients:
         try:
-            apigatewaymanagementapi = boto3.client(
-                'apigatewaymanagementapi',
-                endpoint_url=endpoint_url
+            _apigwClients[endpointUrl] = boto3.client(
+                "apigatewaymanagementapi",
+                endpoint_url=endpointUrl,
             )
-        except Exception as e:
-            logger.error(f"API Gateway client error: {str(e)}")
+        except Exception as err:
+            logger.error("API Gateway client error for %s: %s", endpointUrl, err)
             raise
-    return apigatewaymanagementapi
+    return _apigwClients[endpointUrl]
 
-def broadcast_audio(connections, audio_data, author, connection_id, endpoint_url):
-    """
-    Broadcasts audio data to all connected clients except the sender.
-    
-    This function handles the distribution of processed audio data to all
-    active WebSocket connections. It includes special handling for echo mode
-    and manages connection cleanup for stale connections.
-    
-    The broadcast process:
-    1. Prepares the audio message with metadata
-    2. Attempts to send to each connection
-    3. Handles failed sends and cleans up stale connections
-    4. Tracks broadcast statistics
-    
-    Args:
-        connections (list): List of connection IDs to broadcast to
-        audio_data (str): Base64 encoded audio data
-        author (str): Identifier of the audio source client
-        connection_id (str): WebSocket connection ID of the sender
-        endpoint_url (str): WebSocket API endpoint URL
-    
-    Returns:
-        tuple: (message_sent, successful_broadcasts, failed_broadcasts, deleted_connections)
-    """
-    api_client = get_api_client(endpoint_url)
-    
-    message = {
-        'action': 'audio',
-        'data': {
-            'audio': audio_data,
-            'author': author,
-            'timestamp': datetime.utcnow().isoformat()
-        }
+
+def fetchAllConnectionIds(tableName: str) -> List[str]:
+    """Scan DynamoDB with pagination support and return all active connectionIds."""
+    ddbClient = getDynamodbClient()
+    connections: List[str] = []
+    scanKwargs: Dict[str, Any] = {
+        "TableName": tableName,
+        "ProjectionExpression": "connectionId",
     }
-    
-    message_json = json.dumps(message)
-    successful_broadcasts = 0
-    failed_broadcasts = 0
-    deleted_connections = 0
-    
-    is_echo_mode = os.environ.get('ECHO_MODE', 'false').lower() == 'true'
-    single_connection = len(connections) == 1 and connections[0] == connection_id
-    
-    # If there's only one connection and it's the sender, force echo mode
-    if single_connection:
-        is_echo_mode = True
-        logger.info("Single connection detected, forcing echo mode")
-    
-    logger.info(f"Broadcasting to {len(connections)} connections (Echo mode: {is_echo_mode})")
-    logger.info(f"Source connection: {connection_id}")
-    
-    for conn in connections:
-        logger.info(f"Processing connection: {conn}")
-        
-        # Check if we should broadcast to this connection
-        should_broadcast = is_echo_mode or conn != connection_id
-        if not should_broadcast:
-            logger.info(f"Skipping source connection {conn}")
-            continue
-            
-        try:
-            api_client.post_to_connection(
-                Data=message_json,
-                ConnectionId=conn
-            )
-            successful_broadcasts += 1
-            logger.info(f"Successfully sent to {conn}")
-        except Exception as e:
-            error_msg = str(e)
-            if "GoneException" in error_msg:
-                try:
-                    dynamodb.delete_item(
-                        TableName=os.environ['CONNECTIONS_TABLE'],
-                        Key={'connectionId': {'S': conn}}
-                    )
-                    deleted_connections += 1
-                    logger.info(f"Deleted stale connection: {conn}")
-                except Exception as del_err:
-                    logger.error(f"Connection deletion error: {str(del_err)}")
-            else:
-                failed_broadcasts += 1
-                logger.error(f"Broadcast error for {conn}: {error_msg}")
-    
-    # Log final statistics
-    logger.info(
-        f"Broadcast complete - Total: {len(connections)}, "
-        f"Success: {successful_broadcasts}, Failed: {failed_broadcasts}, "
-        f"Deleted: {deleted_connections}, Echo mode: {is_echo_mode}"
-    )
-    return message, successful_broadcasts, failed_broadcasts, deleted_connections
 
-def validate_audio_format(audio_data):
-    """
-    Validates the format and size of audio data.
-    
-    Performs basic validation on the audio data:
-    1. Verifies it's valid base64 encoded data
-    2. Checks minimum size (1KB) to ensure it's not empty/corrupted
-    3. Checks maximum size (5MB) to prevent oversized payloads
-    
-    Args:
-        audio_data (str): Base64 encoded audio data to validate
-    
-    Returns:
-        tuple: (is_valid, message)
-            - is_valid (bool): Whether the audio data is valid
-            - message (str): Description of validation result or error
-    """
+    while True:
+        response = ddbClient.scan(**scanKwargs)
+        for item in response.get("Items", []):
+            connId = item.get("connectionId", {}).get("S")
+            if connId:
+                connections.append(connId)
+            else:
+                logger.warning("Invalid connection item format: %s", item)
+
+        lastEvaluatedKey = response.get("LastEvaluatedKey")
+        if not lastEvaluatedKey:
+            break
+        scanKwargs["ExclusiveStartKey"] = lastEvaluatedKey
+
+    return connections
+
+
+def resolveAudioData(
+    message: Dict[str, Any], s3Key: Optional[str]
+) -> Optional[str]:
+    """Resolve base64 audio data from the event message or fallback to S3 object."""
+    inlineData = message.get("data")
+    if inlineData and isinstance(inlineData, str):
+        return inlineData
+
+    audioBucket = os.environ.get("AUDIO_BUCKET", AUDIO_BUCKET_NAME)
+    if s3Key and audioBucket:
+        try:
+            s3Obj = getS3Client().get_object(Bucket=audioBucket, Key=s3Key)
+            rawBytes = s3Obj["Body"].read()
+            return base64.b64encode(rawBytes).decode("utf-8")
+        except Exception as err:
+            logger.error("Failed to load audio from S3 (%s/%s): %s", audioBucket, s3Key, err)
+            return None
+    return None
+
+
+def validateAudioFormat(audioData: str) -> Tuple[bool, str]:
+    """Validate base64 encoding and byte size bounds of the audio data."""
     try:
-        decoded_data = base64.b64decode(audio_data)
-        if len(decoded_data) < 1024:
+        decodedData = base64.b64decode(audioData, validate=True)
+        if len(decodedData) < MIN_AUDIO_BYTES:
             return False, "Audio data too small"
-        if len(decoded_data) > 5 * 1024 * 1024:
+        if len(decodedData) > MAX_AUDIO_BYTES:
             return False, "Audio data too large"
         return True, "Valid audio data"
-    except Exception as e:
-        return False, f"Invalid audio data: {str(e)}"
+    except Exception as err:
+        return False, f"Invalid audio data: {err}"
 
-def lambda_handler(event, context):
-    """
-    Main handler for audio validation and broadcasting.
-    
-    This function is triggered by EventBridge events after audio processing.
-    It validates the processed audio data and broadcasts it to all connected
-    clients through their WebSocket connections.
-    
-    Flow:
-    1. Retrieves active connections from DynamoDB
-    2. Validates event structure and required fields
-    3. Validates audio format
-    4. Broadcasts valid audio to all connected clients
-    5. Handles connection cleanup and error cases
-    
-    Args:
-        event (dict): EventBridge event containing processed audio data
-        context (LambdaContext): Lambda runtime information
-    
-    Returns:
-        dict: Response object with statusCode and body containing broadcast results
-    """
+
+def broadcastAudio(
+    connections: List[str],
+    audioData: str,
+    author: str,
+    connectionId: str,
+    endpointUrl: str,
+) -> Tuple[Dict[str, Any], int, int, int]:
+    """Broadcast validated audio data to all connected clients and clean up stale connections."""
+    apiClient = getApiClient(endpointUrl)
+    ddbClient = getDynamodbClient()
+    connectionsTable = os.environ.get("CONNECTIONS_TABLE", CONNECTIONS_TABLE_NAME)
+
+    message = {
+        "action": "audio",
+        "data": {
+            "audio": audioData,
+            "author": author,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "status": "VALIDATED",
+        },
+    }
+
+    messageJson = json.dumps(message)
+    successfulBroadcasts = 0
+    failedBroadcasts = 0
+    deletedConnections = 0
+
+    isEchoMode = os.environ.get("ECHO_MODE", "false").lower() == "true"
+    singleConnection = len(connections) == 1 and connections[0] == connectionId
+
+    if singleConnection:
+        isEchoMode = True
+        logger.info("Single connection detected, forcing echo mode")
+
+    logger.info(
+        "Broadcasting to %d connections (Echo mode: %s)",
+        len(connections),
+        isEchoMode,
+    )
+
+    for conn in connections:
+        shouldBroadcast = isEchoMode or conn != connectionId
+        if not shouldBroadcast:
+            logger.info("Skipping source connection %s", conn)
+            continue
+
+        try:
+            apiClient.post_to_connection(
+                Data=messageJson,
+                ConnectionId=conn,
+            )
+            successfulBroadcasts += 1
+        except Exception as err:
+            errorMsg = str(err)
+            if "GoneException" in errorMsg:
+                try:
+                    ddbClient.delete_item(
+                        TableName=connectionsTable,
+                        Key={"connectionId": {"S": conn}},
+                    )
+                    deletedConnections += 1
+                    logger.info("Deleted stale connection: %s", conn)
+                except Exception as delErr:
+                    logger.error("Connection deletion error: %s", delErr)
+            else:
+                failedBroadcasts += 1
+                logger.error("Broadcast error for %s: %s", conn, errorMsg)
+
+    logger.info(
+        "Broadcast complete - Total: %d, Success: %d, Failed: %d, Deleted: %d, Echo mode: %s",
+        len(connections),
+        successfulBroadcasts,
+        failedBroadcasts,
+        deletedConnections,
+        isEchoMode,
+    )
+    return message, successfulBroadcasts, failedBroadcasts, deletedConnections
+
+
+def buildResponse(statusCode: int, body: Dict[str, Any]) -> Dict[str, Any]:
+    """Build a JSON response dictionary."""
+    return {
+        "statusCode": statusCode,
+        "body": json.dumps(body),
+    }
+
+
+def handleValidateAudio(event: Dict[str, Any], context: Any = None) -> Dict[str, Any]:
+    """Validate processed audio events and broadcast to active WebSocket connections."""
     try:
-        connections_table = os.environ.get('CONNECTIONS_TABLE')
-        logger.info(f"Using connections table: {connections_table}")
-        
+        connectionsTable = os.environ.get("CONNECTIONS_TABLE", CONNECTIONS_TABLE_NAME)
+        if not connectionsTable:
+            logger.error("CONNECTIONS_TABLE environment variable not set")
+            return buildResponse(500, {"error": "Server configuration error"})
+
         try:
-            # Scan for active connections
-            response = dynamodb.scan(
-                TableName=connections_table,
-                ProjectionExpression='connectionId'
-            )
-            
-            # Extract and validate connection IDs
-            connections = []
-            for item in response.get('Items', []):
-                conn_id = item.get('connectionId', {}).get('S')
-                if conn_id:
-                    connections.append(conn_id)
-                else:
-                    logger.warning(f"Invalid connection item format: {item}")
-            
-            logger.info(f"Found {len(connections)} active connections")
-            if connections:
-                logger.info(f"Connection IDs: {connections}")
-            
+            connections = fetchAllConnectionIds(connectionsTable)
+            logger.info("Found %d active connections", len(connections))
             if not connections:
-                return {
-                    'statusCode': 200,
-                    'body': json.dumps({'message': 'No active connections'})
-                }
-            
-        except Exception as e:
-            logger.error(f"DynamoDB scan error: {str(e)}")
-            return {
-                'statusCode': 500,
-                'body': json.dumps({'error': 'Database error'})
-            }
-        
-        # Validate event structure
-        if not isinstance(event.get('detail'), dict):
-            logger.error(f"Invalid event structure: {event}")
-            return {
-                'statusCode': 400,
-                'body': json.dumps({'error': 'Invalid event structure'})
-            }
-        
-        detail = event['detail']
-        message = detail.get('message', {})
-        websocket_context = detail.get('websocket_context', {})
-        
-        # Log incoming event details
-        logger.info(f"Event detail: {json.dumps(detail)}")
-        logger.info(f"WebSocket context: {json.dumps(websocket_context)}")
-        
-        required_fields = {
-            'status': detail.get('status'),
-            'audio_data': message.get('data'),
-            'author': message.get('author'),
-            'connection_id': websocket_context.get('connection_id'),
-            'domain_name': websocket_context.get('domain_name'),
-            'stage': websocket_context.get('stage')
+                return buildResponse(200, {"message": "No active connections"})
+        except Exception as err:
+            logger.error("DynamoDB scan error: %s", err)
+            return buildResponse(500, {"error": "Database error"})
+
+        detail = event.get("detail")
+        if not isinstance(detail, dict):
+            logger.error("Invalid event structure: %s", event)
+            return buildResponse(400, {"error": "Invalid event structure"})
+
+        message = detail.get("message", {})
+        websocketContext = detail.get("websocket_context", {})
+        s3Key = detail.get("s3_key")
+
+        audioData = resolveAudioData(message, s3Key)
+
+        requiredFields = {
+            "status": detail.get("status"),
+            "audio_data": audioData,
+            "author": message.get("author"),
+            "connection_id": websocketContext.get("connection_id"),
+            "domain_name": websocketContext.get("domain_name"),
+            "stage": websocketContext.get("stage"),
         }
-        
-        missing_fields = [field for field, value in required_fields.items() if not value]
-        if missing_fields:
-            logger.error(f"Missing required fields: {missing_fields}")
-            return {
-                'statusCode': 400,
-                'body': json.dumps({'error': f"Missing fields: {', '.join(missing_fields)}"})
-            }
-        
-        status = required_fields['status']
-        audio_data = required_fields['audio_data']
-        author = required_fields['author']
-        connection_id = required_fields['connection_id']
-        endpoint_url = f"https://{required_fields['domain_name']}/{required_fields['stage']}"
-        
-        logger.info(f"Processing audio from {author} (connection: {connection_id})")
-        logger.info(f"Using endpoint URL: {endpoint_url}")
-        
-        is_valid, validation_message = validate_audio_format(audio_data)
-        if not is_valid:
-            logger.error(f"Audio validation failed: {validation_message}")
-            return {
-                'statusCode': 400,
-                'body': json.dumps({'error': validation_message})
-            }
-        
-        try:
-            sent_payload, successes, failures, deletions = broadcast_audio(
-                connections, 
-                audio_data, 
-                author, 
-                connection_id, 
-                endpoint_url
+
+        missingFields = [
+            field for field, value in requiredFields.items() if not value
+        ]
+        if missingFields:
+            logger.error("Missing required fields: %s", missingFields)
+            return buildResponse(
+                400, {"error": f"Missing fields: {', '.join(missingFields)}"}
             )
-            
-            return {
-                'statusCode': 200,
-                'body': json.dumps({
-                    'message': 'Audio broadcast complete',
-                    'statistics': {
-                        'total_connections': len(connections),
-                        'successful': successes,
-                        'failed': failures,
-                        'deleted': deletions
-                    }
-                })
-            }
-        except Exception as e:
-            logger.error(f"Broadcast error: {str(e)}")
-            return {
-                'statusCode': 500,
-                'body': json.dumps({'error': 'Broadcast failed'})
-            }
-        
-    except Exception as e:
-        logger.error(f"Validation error: {str(e)}")
-        return {
-            'statusCode': 500,
-            'body': json.dumps({'error': str(e)})
-        } 
+
+        author = str(requiredFields["author"])
+        connectionId = str(requiredFields["connection_id"])
+        endpointUrl = (
+            f"https://{requiredFields['domain_name']}/{requiredFields['stage']}"
+        )
+
+        isValid, validationMessage = validateAudioFormat(str(audioData))
+        if not isValid:
+            logger.error("Audio validation failed: %s", validationMessage)
+            return buildResponse(400, {"error": validationMessage})
+
+        try:
+            _, successes, failures, deletions = broadcastAudio(
+                connections=connections,
+                audioData=str(audioData),
+                author=author,
+                connectionId=connectionId,
+                endpointUrl=endpointUrl,
+            )
+
+            return buildResponse(
+                200,
+                {
+                    "message": "Audio broadcast complete",
+                    "statistics": {
+                        "total_connections": len(connections),
+                        "successful": successes,
+                        "failed": failures,
+                        "deleted": deletions,
+                    },
+                },
+            )
+        except Exception as err:
+            logger.error("Broadcast error: %s", err)
+            return buildResponse(500, {"error": "Broadcast failed"})
+
+    except Exception as err:
+        logger.error("Validation error: %s", err)
+        return buildResponse(500, {"error": str(err)})
+
+
+def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
+    """AWS Lambda entry point for audio validation and broadcast."""
+    return handleValidateAudio(event, context)

@@ -1,12 +1,13 @@
 # Audio Processing Lambda Functions
 resource "aws_lambda_function" "process_audio" {
-  filename      = var.lambda_functions.process_audio
-  function_name = "${var.prefix}-process-audio"
-  role          = var.lambda_role_arn
-  handler       = "lambda_function.lambda_handler"
-  runtime       = "python3.10"
-  timeout       = var.process_audio_timeout
-  memory_size   = var.process_audio_memory
+  filename         = var.lambda_functions.process_audio
+  source_code_hash = fileexists(var.lambda_functions.process_audio) ? filebase64sha256(var.lambda_functions.process_audio) : null
+  function_name    = "${var.prefix}-process-audio"
+  role             = var.lambda_role_arn
+  handler          = "lambda_function.lambda_handler"
+  runtime          = var.lambda_runtime
+  timeout          = var.process_audio_timeout
+  memory_size      = var.process_audio_memory
 
   environment {
     variables = {
@@ -25,19 +26,22 @@ resource "aws_lambda_function" "process_audio" {
 }
 
 resource "aws_lambda_function" "validate_audio" {
-  filename      = var.lambda_functions.validate_audio
-  function_name = "${var.prefix}-validate-audio"
-  role          = var.lambda_role_arn
-  handler       = "lambda_function.lambda_handler"
-  runtime       = "python3.10"
-  timeout       = var.validate_audio_timeout
-  memory_size   = var.validate_audio_memory
+  filename         = var.lambda_functions.validate_audio
+  source_code_hash = fileexists(var.lambda_functions.validate_audio) ? filebase64sha256(var.lambda_functions.validate_audio) : null
+  function_name    = "${var.prefix}-validate-audio"
+  role             = var.lambda_role_arn
+  handler          = "lambda_function.lambda_handler"
+  runtime          = var.lambda_runtime
+  timeout          = var.validate_audio_timeout
+  memory_size      = var.validate_audio_memory
 
   environment {
     variables = {
       CONNECTIONS_TABLE = "${var.project_name}-${var.stage}-connections"
+      AUDIO_BUCKET      = var.audio_bucket_name
       EVENT_BUS_NAME    = var.event_bus_name
       EVENT_SOURCE      = var.event_source
+      ECHO_MODE         = tostring(var.enable_echo_mode)
     }
   }
 
@@ -51,13 +55,14 @@ resource "aws_lambda_function" "validate_audio" {
 
 # WebSocket Connection Management Lambda Functions
 resource "aws_lambda_function" "connect" {
-  filename      = var.lambda_functions.connect
-  function_name = "${var.prefix}-connect"
-  role          = var.lambda_role_arn
-  handler       = "lambda_function.lambda_handler"
-  runtime       = "python3.10"
-  timeout       = var.websocket_timeout
-  memory_size   = var.websocket_memory
+  filename         = var.lambda_functions.connect
+  source_code_hash = fileexists(var.lambda_functions.connect) ? filebase64sha256(var.lambda_functions.connect) : null
+  function_name    = "${var.prefix}-connect"
+  role             = var.lambda_role_arn
+  handler          = "lambda_function.lambda_handler"
+  runtime          = var.lambda_runtime
+  timeout          = var.websocket_timeout
+  memory_size      = var.websocket_memory
 
   environment {
     variables = {
@@ -74,13 +79,14 @@ resource "aws_lambda_function" "connect" {
 }
 
 resource "aws_lambda_function" "disconnect" {
-  filename      = var.lambda_functions.disconnect
-  function_name = "${var.prefix}-disconnect"
-  role          = var.lambda_role_arn
-  handler       = "lambda_function.lambda_handler"
-  runtime       = "python3.10"
-  timeout       = var.websocket_timeout
-  memory_size   = var.websocket_memory
+  filename         = var.lambda_functions.disconnect
+  source_code_hash = fileexists(var.lambda_functions.disconnect) ? filebase64sha256(var.lambda_functions.disconnect) : null
+  function_name    = "${var.prefix}-disconnect"
+  role             = var.lambda_role_arn
+  handler          = "lambda_function.lambda_handler"
+  runtime          = var.lambda_runtime
+  timeout          = var.websocket_timeout
+  memory_size      = var.websocket_memory
 
   environment {
     variables = {
@@ -97,19 +103,22 @@ resource "aws_lambda_function" "disconnect" {
 }
 
 resource "aws_lambda_function" "message" {
-  filename      = var.lambda_functions.message
-  function_name = "${var.prefix}-message"
-  role          = var.lambda_role_arn
-  handler       = "lambda_function.lambda_handler"
-  runtime       = "python3.10"
-  timeout       = var.websocket_timeout
-  memory_size   = var.websocket_memory
+  filename         = var.lambda_functions.message
+  source_code_hash = fileexists(var.lambda_functions.message) ? filebase64sha256(var.lambda_functions.message) : null
+  function_name    = "${var.prefix}-message"
+  role             = var.lambda_role_arn
+  handler          = "lambda_function.lambda_handler"
+  runtime          = var.lambda_runtime
+  timeout          = var.websocket_timeout
+  memory_size      = var.websocket_memory
 
   environment {
     variables = {
       CONNECTIONS_TABLE = "${var.project_name}-${var.stage}-connections"
       EVENT_BUS_NAME    = var.event_bus_name
       EVENT_SOURCE      = var.event_source
+      DIRECT_BROADCAST  = tostring(var.enable_direct_broadcast)
+      ECHO_MODE         = tostring(var.enable_echo_mode)
     }
   }
 
@@ -161,4 +170,4 @@ resource "aws_lambda_permission" "message" {
   function_name = aws_lambda_function.message.function_name
   principal     = "apigateway.amazonaws.com"
   source_arn    = "${var.api_gateway_execution_arn}/*/*"
-} 
+}
