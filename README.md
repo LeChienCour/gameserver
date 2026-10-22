@@ -22,17 +22,17 @@ The infrastructure consists of several key components:
      - `sendaudio`: Processes incoming audio data
      - `$default`: Handles unmatched routes
 
-2. **Lambda Functions**
-   - `connect`: Manages new WebSocket connections and stores connection data
+2. **Lambda Functions (Python 3.12)**
+   - `authorizer`: Validates WebSocket `$connect` requests against the API key in SSM Parameter Store
+   - `connect`: Manages new WebSocket connections and stores connection data with DynamoDB TTL
    - `disconnect`: Cleans up terminated connections
-   - `message`: Handles WebSocket messages and audio events
-   - `process_audio`: Processes and stores audio in S3
-   - `validate_audio`: Validates and broadcasts audio to connected clients
+   - `message`: Handles WebSocket messages (`ping` and `sendaudio`), supports low-latency direct broadcast (`DIRECT_BROADCAST`), and publishes events to EventBridge
+   - `process_audio`: Archives raw PCM audio in S3 with collision-free microsecond + UUID keys
+   - `validate_audio`: Validates and broadcasts audio to connected clients (when `DIRECT_BROADCAST` is disabled) with paginated DynamoDB scans
 
 3. **Storage**
-   - DynamoDB for WebSocket connections
-   - S3 bucket for audio storage
-   - KMS for audio encryption
+   - DynamoDB for WebSocket connections (with automatic TTL expiration)
+   - S3 bucket for audio storage (with 7-day lifecycle expiration and AES256 encryption)
 
 4. **Event Processing**
    - EventBridge for event routing

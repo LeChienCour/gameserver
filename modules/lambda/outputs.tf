@@ -23,6 +23,16 @@ output "message_function_arn" {
   value       = aws_lambda_function.message.arn
 }
 
+output "authorizer_function_arn" {
+  description = "ARN of the WebSocket authorizer Lambda function"
+  value       = aws_lambda_function.authorizer.arn
+}
+
+output "authorizer_invoke_arn" {
+  description = "Invoke ARN of the WebSocket authorizer Lambda function"
+  value       = aws_lambda_function.authorizer.invoke_arn
+}
+
 output "process_audio_function_name" {
   description = "Name of the process audio Lambda function"
   value       = aws_lambda_function.process_audio.function_name
@@ -41,6 +51,7 @@ output "lambda_functions" {
     connect        = aws_lambda_function.connect.arn
     disconnect     = aws_lambda_function.disconnect.arn
     message        = aws_lambda_function.message.arn
+    authorizer     = aws_lambda_function.authorizer.arn
   }
 }
 
@@ -52,5 +63,6 @@ output "lambda_function_names" {
     connect        = aws_lambda_function.connect.function_name
     disconnect     = aws_lambda_function.disconnect.function_name
     message        = aws_lambda_function.message.function_name
+    authorizer     = aws_lambda_function.authorizer.function_name
   }
 } 

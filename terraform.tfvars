@@ -9,13 +9,13 @@ vpc_name            = "game-server-vpc"
 
 # Security Configuration
 security_group_name = "game-server-sg"
-game_port           = 27015
+game_port           = 25565
 ssh_cidr            = "0.0.0.0/0"
-game_protocol       = "udp"
+game_protocol       = "tcp"
 
-# EC2 Configuration
-ami_id        = "ami-0e3faa5e960844571"
-instance_type = "t4g.small"
+# EC2 Configuration (null ami_id auto-selects latest AL2023 matching instance_type arch)
+ami_id        = null
+instance_type = "t4g.medium"
 
 # Cognito Configuration
 user_pool_name  = "game-users"
@@ -38,8 +38,9 @@ websocket_prefix     = "game-server-ws"
 websocket_stage_name = "test"
 
 # Storage Configuration
-audio_bucket_name = "voice-chat-audio-bucket"
-connections_table = "voice-chat-connections"
+audio_bucket_name    = "voice-chat-audio-bucket"
+audio_retention_days = 7
+connections_table    = "voice-chat-connections"
 
 # Lambda Configuration
 lambda_functions = {
@@ -48,7 +49,10 @@ lambda_functions = {
   connect        = "lambda/connect.zip"
   disconnect     = "lambda/disconnect.zip"
   message        = "lambda/message.zip"
+  authorizer     = "lambda/authorizer.zip"
 }
 
 # Feature Flags
-enable_echo_mode = true
+enable_echo_mode         = true
+enable_direct_broadcast  = true
+enable_custom_authorizer = false

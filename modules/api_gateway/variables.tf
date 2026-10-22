@@ -59,6 +59,18 @@ variable "lambda_message_arn" {
   type        = string
 }
 
+variable "lambda_authorizer_invoke_arn" {
+  description = "Invoke ARN of the WebSocket REQUEST authorizer Lambda function"
+  type        = string
+  default     = null
+}
+
+variable "enable_custom_authorizer" {
+  description = "Enable custom Lambda authorizer on the WebSocket $connect route"
+  type        = bool
+  default     = false
+}
+
 # Optional VPC Configuration
 variable "vpc_id" {
   description = "ID of the VPC (optional)"

@@ -114,6 +114,12 @@ variable "enable_direct_broadcast" {
   default     = true
 }
 
+variable "enable_custom_authorizer" {
+  description = "Enable custom Lambda authorizer on the WebSocket $connect route"
+  type        = bool
+  default     = false
+}
+
 # Lambda Configuration
 variable "lambda_environment_variables" {
   description = "Additional environment variables for Lambda functions"
@@ -130,6 +136,7 @@ variable "lambda_functions" {
     message        = "lambda/message.zip"
     process_audio  = "lambda/process_audio.zip"
     validate_audio = "lambda/validate_audio.zip"
+    authorizer     = "lambda/authorizer.zip"
   }
 }
 
