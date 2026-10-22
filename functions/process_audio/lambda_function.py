@@ -1,216 +1,235 @@
-import json
-import boto3
+"""Audio processing and S3 archival Lambda handler."""
+
 import base64
-import os
-from datetime import datetime
+import json
 import logging
+import os
+import re
+import uuid
+from datetime import datetime, timezone
+from typing import Any, Dict, Optional
+
+import boto3
 
 # Configure logging for CloudWatch
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
+logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
 
-# Initialize AWS service clients
-s3 = boto3.client('s3')
-eventbridge = boto3.client('events')
+# Environment variables (UPPER_CASE)
+AUDIO_BUCKET_NAME = os.environ.get("AUDIO_BUCKET", "")
+EVENT_BUS_NAME = os.environ.get("EVENT_BUS_NAME", "")
+EVENT_SOURCE = os.environ.get("EVENT_SOURCE", "voice-chat")
 
-def validate_env_vars():
-    """
-    Validates required environment variables are set.
-    
-    This function checks for the presence of required environment variables
-    that are needed for the function to operate correctly. Currently checks
-    for:
-    - AUDIO_BUCKET: S3 bucket for storing audio files
-    
-    Raises:
-        ValueError: If any required environment variables are missing
-    """
-    required_vars = ['AUDIO_BUCKET']
-    missing_vars = [var for var in required_vars if not os.environ.get(var)]
-    if missing_vars:
-        raise ValueError(f"Missing required environment variables: {', '.join(missing_vars)}")
+_s3Client = None
+_eventbridgeClient = None
 
-def get_websocket_context(event):
-    """
-    Extracts WebSocket context from either direct WebSocket or EventBridge events.
-    
-    This function handles two types of events:
-    1. Direct WebSocket events from API Gateway
-    2. EventBridge events containing WebSocket context
-    
-    The context includes:
-    - domain_name: API Gateway domain
-    - stage: API deployment stage
-    - connection_id: Client's WebSocket connection ID
-    
-    Args:
-        event (dict): Lambda event from either source
-    
-    Returns:
-        dict: WebSocket context information, or None if not found
-    """
-    if 'requestContext' in event:
-        request_context = event.get('requestContext', {})
-        context = {
-            'domain_name': request_context.get('domainName'),
-            'stage': request_context.get('stage'),
-            'connection_id': request_context.get('connectionId')
+
+def getS3Client() -> Any:
+    """Return a cached S3 client."""
+    global _s3Client
+    if _s3Client is None:
+        _s3Client = boto3.client("s3")
+    return _s3Client
+
+
+def getEventbridgeClient() -> Any:
+    """Return a cached EventBridge client."""
+    global _eventbridgeClient
+    if _eventbridgeClient is None:
+        _eventbridgeClient = boto3.client("events")
+    return _eventbridgeClient
+
+
+def validateEnvVars() -> str:
+    """Validate that required environment variables are set and return AUDIO_BUCKET."""
+    requiredVars = ["AUDIO_BUCKET"]
+    missingVars = [var for var in requiredVars if not os.environ.get(var)]
+    if missingVars:
+        raise ValueError(
+            f"Missing required environment variables: {', '.join(missingVars)}"
+        )
+    return os.environ["AUDIO_BUCKET"]
+
+
+def sanitizeAuthor(author: str) -> str:
+    """Sanitize author identifier to prevent S3 key traversal or invalid characters."""
+    cleaned = re.sub(r"[^a-zA-Z0-9_-]", "_", author or "Anonymous")
+    return cleaned[:64] or "Anonymous"
+
+
+def getWebsocketContext(event: Dict[str, Any]) -> Optional[Dict[str, Optional[str]]]:
+    """Extract WebSocket context from either direct WebSocket or EventBridge events."""
+    if "requestContext" in event:
+        requestContext = event.get("requestContext", {})
+        return {
+            "domain_name": requestContext.get("domainName"),
+            "stage": requestContext.get("stage"),
+            "connection_id": requestContext.get("connectionId"),
         }
-        return context
-    elif 'detail' in event:
-        detail = event.get('detail', {})
-        return detail.get('websocket_context', {})
+    if "detail" in event and isinstance(event.get("detail"), dict):
+        detail = event["detail"]
+        return detail.get("websocket_context", {})
     return None
 
-def get_audio_data(event):
-    """
-    Extracts audio data from either WebSocket or EventBridge events.
-    
-    This function handles audio data extraction and validation from:
-    1. Direct WebSocket messages
-    2. EventBridge events containing audio data
-    
-    The function performs basic validation:
-    - Ensures audio data is present
-    - Validates base64 encoding
-    - Extracts author information
-    
-    Args:
-        event (dict): Lambda event containing audio data
-    
-    Returns:
-        dict: Dictionary containing audio_data and author, or None if invalid
-    """
-    if 'detail' in event:
-        detail = event.get('detail', {})
-        message = detail.get('message', {})
-        audio_data = {
-            'audio_data': message.get('data'),
-            'author': message.get('author', 'Anonymous')
-        }
+
+def getAudioData(event: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Extract and decode audio data from either WebSocket or EventBridge events."""
+    if "detail" in event and isinstance(event.get("detail"), dict):
+        detail = event["detail"]
+        message = detail.get("message", {})
+        rawAudio = message.get("data")
+        author = message.get("author", "Anonymous")
     else:
         try:
-            body = json.loads(event.get('body', '{}'))
-            audio_data = {
-                'audio_data': body.get('data'),
-                'author': body.get('author', 'Anonymous')
-            }
-        except json.JSONDecodeError as e:
-            logger.error(f"Invalid JSON in WebSocket message: {str(e)}")
+            body = json.loads(event.get("body") or "{}")
+            rawAudio = body.get("data")
+            author = body.get("author", "Anonymous")
+        except json.JSONDecodeError as err:
+            logger.error("Invalid JSON in WebSocket message: %s", err)
             return None
-    
-    if not audio_data.get('audio_data'):
-        return None
-    
-    try:
-        base64.b64decode(audio_data['audio_data'])
-        return audio_data
-    except Exception as e:
-        logger.error(f"Invalid base64 audio data: {str(e)}")
+
+    if not rawAudio or not isinstance(rawAudio, str):
         return None
 
-def lambda_handler(event, context):
-    """
-    Main handler for audio processing in the voice chat system.
-    
-    This function processes audio data from WebSocket connections:
-    1. Validates environment configuration
-    2. Extracts and validates WebSocket context
-    3. Processes and stores audio data in S3
-    4. Sends processed audio event to EventBridge for broadcasting
-    
-    The function handles both direct WebSocket events and EventBridge events,
-    maintaining the WebSocket context throughout the processing pipeline.
-    
-    Flow:
-    1. Validate environment and extract context
-    2. Extract and validate audio data
-    3. Store audio in S3 with metadata
-    4. Send processed event to EventBridge for broadcasting
-    
-    Args:
-        event (dict): Lambda event containing audio data and context
-        context (LambdaContext): Lambda runtime information
-    
-    Returns:
-        dict: Response object with statusCode and body
-    """
     try:
-        validate_env_vars()
-        
-        ws_context = get_websocket_context(event)
-        if not ws_context or not all([ws_context.get('domain_name'), ws_context.get('stage'), ws_context.get('connection_id')]):
-            error_msg = f"Missing WebSocket context fields: {list(ws_context.keys()) if ws_context else 'None'}"
-            logger.error(error_msg)
-            return {
-                'statusCode': 400,
-                'body': json.dumps({'error': error_msg})
-            }
-            
-        audio_info = get_audio_data(event)
-        if not audio_info:
-            return {
-                'statusCode': 400,
-                'body': json.dumps({'error': 'Invalid or missing audio data'})
-            }
-            
-        timestamp = datetime.utcnow().strftime('%Y%m%d_%H%M%S')
-        s3_key = f"audio/{audio_info['author']}/{timestamp}.pcm"
-        
-        try:
-            s3.put_object(
-                Bucket=os.environ['AUDIO_BUCKET'],
-                Key=s3_key,
-                Body=base64.b64decode(audio_info['audio_data'])
-            )
-            logger.info(f"Audio stored: {s3_key}")
-        except Exception as e:
-            logger.error(f"S3 storage error: {str(e)}")
-            return {
-                'statusCode': 500,
-                'body': json.dumps({'error': 'Error storing audio'})
-            }
-        
-        try:
-            event_detail = {
-                'status': 'PROCESSED',
-                'message': {
-                    'action': 'sendaudio',
-                    'data': audio_info['audio_data'],
-                    'author': audio_info['author']
-                },
-                'websocket_context': ws_context,
-                's3_key': s3_key,
-                'timestamp': datetime.utcnow().isoformat()
-            }
-            
-            event_entry = {
-                'Source': os.environ.get('EVENT_SOURCE', 'voice-chat'),
-                'DetailType': 'SendAudioEvent',
-                'Detail': json.dumps(event_detail),
-                'EventBusName': os.environ.get('EVENT_BUS_NAME')
-            }
-            
-            eventbridge.put_events(Entries=[event_entry])
-            logger.info(f"Audio validation event sent for {s3_key}")
-            
-            return {
-                'statusCode': 200,
-                'body': json.dumps({
-                    'message': 'Audio processed',
-                    's3_key': s3_key
-                })
-            }
-        except Exception as e:
-            logger.error(f"EventBridge error: {str(e)}")
-            return {
-                'statusCode': 500,
-                'body': json.dumps({'error': 'Error sending validation event'})
-            }
-            
-    except Exception as e:
-        logger.error(f"Process audio error: {str(e)}")
+        decodedBytes = base64.b64decode(rawAudio, validate=True)
+        if not decodedBytes:
+            return None
         return {
-            'statusCode': 500,
-            'body': json.dumps({'error': str(e)})
-        } 
+            "audio_data": rawAudio,
+            "decoded_bytes": decodedBytes,
+            "author": author,
+        }
+    except Exception as err:
+        logger.error("Invalid base64 audio data: %s", err)
+        return None
+
+
+def buildS3Key(author: str, nowUtc: Optional[datetime] = None) -> str:
+    """Build a collision-free S3 key using microsecond timestamps and a short UUID."""
+    currentTime = nowUtc or datetime.now(timezone.utc)
+    safeAuthor = sanitizeAuthor(author)
+    timestampStr = currentTime.strftime("%Y%m%d_%H%M%S_%f")
+    uniqueSuffix = uuid.uuid4().hex[:8]
+    return f"audio/{safeAuthor}/{timestampStr}_{uniqueSuffix}.pcm"
+
+
+def buildResponse(statusCode: int, body: Dict[str, Any]) -> Dict[str, Any]:
+    """Build a JSON response dictionary."""
+    return {
+        "statusCode": statusCode,
+        "body": json.dumps(body),
+    }
+
+
+def handleProcessAudio(event: Dict[str, Any], context: Any = None) -> Dict[str, Any]:
+    """Store incoming PCM audio in S3 and publish a PROCESSED event to EventBridge."""
+    try:
+        audioBucket = validateEnvVars()
+
+        wsContext = getWebsocketContext(event)
+        if not wsContext or not all(
+            [
+                wsContext.get("domain_name"),
+                wsContext.get("stage"),
+                wsContext.get("connection_id"),
+            ]
+        ):
+            errorMsg = (
+                f"Missing WebSocket context fields: "
+                f"{list(wsContext.keys()) if wsContext else 'None'}"
+            )
+            logger.error(errorMsg)
+            return buildResponse(400, {"error": errorMsg})
+
+        audioInfo = getAudioData(event)
+        if not audioInfo:
+            return buildResponse(400, {"error": "Invalid or missing audio data"})
+
+        nowUtc = datetime.now(timezone.utc)
+        s3Key = buildS3Key(audioInfo["author"], nowUtc)
+
+        try:
+            getS3Client().put_object(
+                Bucket=audioBucket,
+                Key=s3Key,
+                Body=audioInfo["decoded_bytes"],
+                ContentType="audio/pcm",
+                Metadata={
+                    "author": sanitizeAuthor(audioInfo["author"]),
+                    "connection_id": str(wsContext["connection_id"]),
+                    "timestamp": nowUtc.isoformat(),
+                },
+            )
+            logger.info("Audio stored: %s", s3Key)
+        except Exception as err:
+            logger.error("S3 storage error: %s", err)
+            return buildResponse(500, {"error": "Error storing audio"})
+
+        # Check if message was already broadcasted on the fast path
+        incomingStatus = (
+            event.get("detail", {}).get("status", "PENDING")
+            if isinstance(event.get("detail"), dict)
+            else "PENDING"
+        )
+        if incomingStatus == "BROADCASTED":
+            logger.info(
+                "Audio %s was already broadcasted via fast-path; skipping validation event",
+                s3Key,
+            )
+            return buildResponse(
+                200,
+                {
+                    "message": "Audio archived",
+                    "s3_key": s3Key,
+                },
+            )
+
+        try:
+            eventDetail = {
+                "status": "PROCESSED",
+                "message": {
+                    "action": "sendaudio",
+                    "data": audioInfo["audio_data"],
+                    "author": audioInfo["author"],
+                },
+                "websocket_context": wsContext,
+                "s3_key": s3Key,
+                "timestamp": nowUtc.isoformat(),
+            }
+
+            eventEntry: Dict[str, Any] = {
+                "Source": os.environ.get("EVENT_SOURCE", EVENT_SOURCE),
+                "DetailType": "SendAudioEvent",
+                "Detail": json.dumps(eventDetail),
+            }
+            eventBusName = os.environ.get("EVENT_BUS_NAME", EVENT_BUS_NAME)
+            if eventBusName:
+                eventEntry["EventBusName"] = eventBusName
+
+            putResponse = getEventbridgeClient().put_events(Entries=[eventEntry])
+            if putResponse.get("FailedEntryCount", 0) > 0:
+                raise RuntimeError(
+                    f"EventBridge failed entries: {putResponse.get('Entries')}"
+                )
+
+            logger.info("Audio validation event sent for %s", s3Key)
+            return buildResponse(
+                200,
+                {
+                    "message": "Audio processed",
+                    "s3_key": s3Key,
+                },
+            )
+        except Exception as err:
+            logger.error("EventBridge error: %s", err)
+            return buildResponse(500, {"error": "Error sending validation event"})
+
+    except Exception as err:
+        logger.error("Process audio error: %s", err)
+        return buildResponse(500, {"error": str(err)})
+
+
+def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
+    """AWS Lambda entry point for audio processing."""
+    return handleProcessAudio(event, context)

@@ -37,6 +37,9 @@ permissions: read-all
 jobs:
   # First job: Deploy infrastructure using Terraform
   terraform_deploy:
+    # CD disabled: skips this job and everything that depends on it (build_mod, deploy, cleanup).
+    # Remove this line to re-enable infrastructure deployment.
+    if: false
     runs-on: ubuntu-latest
     permissions:
       contents: read        # For checkout

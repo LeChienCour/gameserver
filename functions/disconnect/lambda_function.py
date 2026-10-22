@@ -1,71 +1,85 @@
+"""WebSocket $disconnect route Lambda handler."""
+
 import json
-import boto3
-import os
 import logging
+import os
+from typing import Any, Dict
 
-logger = logging.getLogger()
-logger.setLevel(logging.INFO)
+import boto3
+from botocore.exceptions import ClientError
 
-dynamodb = boto3.resource('dynamodb')
-table_name = os.environ.get('CONNECTIONS_TABLE')
-if not table_name:
-    logger.error("DynamoDB connections table name not set in environment variables (CONNECTIONS_TABLE)")
-table = None
-if table_name:
-    table = dynamodb.Table(table_name)
+# Configure logging
+logger = logging.getLogger(__name__)
+logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
 
-def lambda_handler(event, context):
-    # Log the full event for debugging
-    logger.info(f"Received disconnect event: {json.dumps(event)}")
-    
-    connection_id = event.get('requestContext', {}).get('connectionId')
-    logger.info(f"Disconnect event for connectionId: {connection_id}")
-    logger.info(f"Using DynamoDB table: {table_name}")
+# Environment variables (UPPER_CASE)
+CONNECTIONS_TABLE_NAME = os.environ.get("CONNECTIONS_TABLE", "")
 
-    if not connection_id:
+_dynamodbResource = None
+
+
+def getDynamodbTable() -> Any:
+    """Return a cached DynamoDB Table resource for WebSocket connections."""
+    global _dynamodbResource
+    tableName = os.environ.get("CONNECTIONS_TABLE", CONNECTIONS_TABLE_NAME)
+    if not tableName:
+        raise ValueError(
+            "DynamoDB connections table name not set in environment variables (CONNECTIONS_TABLE)"
+        )
+    if _dynamodbResource is None:
+        _dynamodbResource = boto3.resource("dynamodb")
+    return _dynamodbResource.Table(tableName)
+
+
+def buildResponse(statusCode: int, body: Any) -> Dict[str, Any]:
+    """Build an API Gateway proxy response dictionary."""
+    serializedBody = body if isinstance(body, str) else json.dumps(body)
+    return {
+        "statusCode": statusCode,
+        "body": serializedBody,
+    }
+
+
+def handleDisconnect(event: Dict[str, Any], context: Any = None) -> Dict[str, Any]:
+    """Process a WebSocket disconnection and remove the connection record from DynamoDB."""
+    logger.info("Received disconnect event: %s", json.dumps(event))
+
+    requestContext = event.get("requestContext", {})
+    connectionId = requestContext.get("connectionId")
+
+    if not connectionId:
         logger.error("Connection ID not found in event")
-        return {'statusCode': 400, 'body': 'Connection ID not found.'}
-
-    if not table:
-        logger.error(f"DynamoDB table {table_name} not initialized.")
-        return {'statusCode': 500, 'body': 'Server configuration error.'}
+        return buildResponse(400, "Connection ID not found.")
 
     try:
-        # Check if connection exists before deleting
-        try:
-            get_response = table.get_item(Key={'connectionId': connection_id})
-            if 'Item' in get_response:
-                logger.info(f"Found existing connection to delete: {json.dumps(get_response['Item'])}")
-            else:
-                logger.warning(f"No existing connection found for ID: {connection_id}")
-        except Exception as ge:
-            logger.error(f"Error checking existing connection: {str(ge)}")
-        
-        # Delete the connection
-        delete_response = table.delete_item(
-            Key={
-                'connectionId': connection_id
-            },
-            ReturnValues='ALL_OLD'  # This will return the deleted item
+        connectionsTable = getDynamodbTable()
+    except ValueError as err:
+        logger.error("Configuration error: %s", err)
+        return buildResponse(500, "Server configuration error.")
+
+    try:
+        deleteResponse = connectionsTable.delete_item(
+            Key={"connectionId": connectionId},
+            ReturnValues="ALL_OLD",
         )
-        
-        # Log the deleted item if it existed
-        if 'Attributes' in delete_response:
-            logger.info(f"Successfully deleted connection: {json.dumps(delete_response['Attributes'])}")
+        deletedAttributes = deleteResponse.get("Attributes")
+        if deletedAttributes:
+            logger.info(
+                "Successfully deleted connection %s",
+                connectionId,
+            )
         else:
-            logger.warning(f"No connection found to delete for ID: {connection_id}")
-        
-        # Verify deletion
-        try:
-            verification = table.get_item(Key={'connectionId': connection_id})
-            if 'Item' not in verification:
-                logger.info(f"Successfully verified connection deletion for {connection_id}")
-            else:
-                logger.warning(f"Connection still exists after deletion attempt: {json.dumps(verification['Item'])}")
-        except Exception as ve:
-            logger.error(f"Error verifying connection deletion: {str(ve)}")
-        
-        return {'statusCode': 200, 'body': 'Disconnected.'}
-    except Exception as e:
-        logger.error(f"Error deleting connection {connection_id}: {str(e)}")
-        return {'statusCode': 500, 'body': f"Failed to disconnect: {str(e)}"}
+            logger.warning("No connection found to delete for ID: %s", connectionId)
+
+        return buildResponse(200, "Disconnected.")
+    except ClientError as err:
+        logger.error("DynamoDB error deleting connection %s: %s", connectionId, err)
+        return buildResponse(500, f"Failed to disconnect: {err}")
+    except Exception as err:
+        logger.error("Unexpected error deleting connection %s: %s", connectionId, err)
+        return buildResponse(500, f"Failed to disconnect: {err}")
+
+
+def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
+    """AWS Lambda entry point for the WebSocket $disconnect route."""
+    return handleDisconnect(event, context)

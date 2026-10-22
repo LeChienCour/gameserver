@@ -108,6 +108,12 @@ variable "enable_echo_mode" {
   default     = true
 }
 
+variable "enable_direct_broadcast" {
+  description = "Enable low-latency direct broadcast in message Lambda before EventBridge archival"
+  type        = bool
+  default     = true
+}
+
 # Lambda Configuration
 variable "lambda_environment_variables" {
   description = "Additional environment variables for Lambda functions"

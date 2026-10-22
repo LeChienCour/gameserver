@@ -1,68 +1,91 @@
+"""WebSocket $connect route Lambda handler."""
+
 import json
-import boto3
-import os
 import logging
-from datetime import datetime
+import os
+import time
+from datetime import datetime, timezone
+from typing import Any, Dict
+
+import boto3
+from botocore.exceptions import ClientError
 
 # Configure logging
-logger = logging.getLogger()
-logger.setLevel(logging.INFO)
+logger = logging.getLogger(__name__)
+logger.setLevel(os.environ.get("LOG_LEVEL", "INFO"))
 
-dynamodb = boto3.resource('dynamodb')
-table_name = os.environ.get('CONNECTIONS_TABLE') # Get table name from environment variable
-if not table_name:
-    logger.error("DynamoDB connections table name not set in environment variables (CONNECTIONS_TABLE)")
-    # Fallback or raise error, depending on desired behavior if env var is missing
-    # For now, let's assume it will be set. If not, calls will fail.
-table = None
-if table_name:
-    table = dynamodb.Table(table_name)
+# Environment variables (UPPER_CASE)
+CONNECTIONS_TABLE_NAME = os.environ.get("CONNECTIONS_TABLE", "")
+CONNECTION_TTL_SECONDS = int(os.environ.get("CONNECTION_TTL_SECONDS", "86400"))
 
-def lambda_handler(event, context):
-    # Log the full event for debugging
-    logger.info(f"Received connect event: {json.dumps(event)}")
-    
-    connection_id = event.get('requestContext', {}).get('connectionId')
-    domain_name = event.get('requestContext', {}).get('domainName')
-    stage = event.get('requestContext', {}).get('stage')
-    
-    logger.info(f"Connect event for connectionId: {connection_id}")
-    logger.info(f"Domain: {domain_name}, Stage: {stage}")
-    logger.info(f"Using DynamoDB table: {table_name}")
+_dynamodbResource = None
 
-    if not connection_id:
+
+def getDynamodbTable() -> Any:
+    """Return a cached DynamoDB Table resource for WebSocket connections."""
+    global _dynamodbResource
+    tableName = os.environ.get("CONNECTIONS_TABLE", CONNECTIONS_TABLE_NAME)
+    if not tableName:
+        raise ValueError(
+            "DynamoDB connections table name not set in environment variables (CONNECTIONS_TABLE)"
+        )
+    if _dynamodbResource is None:
+        _dynamodbResource = boto3.resource("dynamodb")
+    return _dynamodbResource.Table(tableName)
+
+
+def buildResponse(statusCode: int, body: Any) -> Dict[str, Any]:
+    """Build an API Gateway proxy response dictionary."""
+    serializedBody = body if isinstance(body, str) else json.dumps(body)
+    return {
+        "statusCode": statusCode,
+        "body": serializedBody,
+    }
+
+
+def handleConnect(event: Dict[str, Any], context: Any = None) -> Dict[str, Any]:
+    """Process a new WebSocket connection and store its metadata in DynamoDB."""
+    logger.info("Received connect event: %s", json.dumps(event))
+
+    requestContext = event.get("requestContext", {})
+    connectionId = requestContext.get("connectionId")
+    domainName = requestContext.get("domainName")
+    stage = requestContext.get("stage")
+
+    if not connectionId:
         logger.error("Connection ID not found in event")
-        return {'statusCode': 400, 'body': 'Connection ID not found.'}
-
-    if not table:
-        logger.error(f"DynamoDB table {table_name} not initialized.")
-        return {'statusCode': 500, 'body': 'Server configuration error.'}
+        return buildResponse(400, "Connection ID not found.")
 
     try:
-        # Create connection record with timestamp
-        connection_item = {
-            'connectionId': connection_id,
-            'connectedAt': datetime.utcnow().isoformat(),
-            'domain': domain_name,
-            'stage': stage
-        }
-        
-        logger.info(f"Storing connection item: {json.dumps(connection_item)}")
-        
-        table.put_item(Item=connection_item)
-        
-        # Verify the connection was stored
-        try:
-            verification = table.get_item(Key={'connectionId': connection_id})
-            if 'Item' in verification:
-                logger.info(f"Successfully verified connection storage: {json.dumps(verification['Item'])}")
-            else:
-                logger.warning(f"Connection verification failed - item not found after storage")
-        except Exception as ve:
-            logger.error(f"Error verifying connection storage: {str(ve)}")
-        
-        logger.info(f"Connection {connection_id} stored successfully.")
-        return {'statusCode': 200, 'body': 'Connected.'}
-    except Exception as e:
-        logger.error(f"Error storing connection {connection_id}: {str(e)}")
-        return {'statusCode': 500, 'body': f"Failed to connect: {str(e)}"}
+        connectionsTable = getDynamodbTable()
+    except ValueError as err:
+        logger.error("Configuration error: %s", err)
+        return buildResponse(500, "Server configuration error.")
+
+    currentTimestamp = datetime.now(timezone.utc).isoformat()
+    ttlEpoch = int(time.time()) + CONNECTION_TTL_SECONDS
+
+    connectionItem: Dict[str, Any] = {
+        "connectionId": connectionId,
+        "connectedAt": currentTimestamp,
+        "domain": domainName,
+        "stage": stage,
+        "ttl": ttlEpoch,
+    }
+
+    try:
+        logger.info("Storing connection item: %s", json.dumps(connectionItem))
+        connectionsTable.put_item(Item=connectionItem)
+        logger.info("Connection %s stored successfully.", connectionId)
+        return buildResponse(200, "Connected.")
+    except ClientError as err:
+        logger.error("DynamoDB error storing connection %s: %s", connectionId, err)
+        return buildResponse(500, f"Failed to connect: {err}")
+    except Exception as err:
+        logger.error("Unexpected error storing connection %s: %s", connectionId, err)
+        return buildResponse(500, f"Failed to connect: {err}")
+
+
+def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
+    """AWS Lambda entry point for the WebSocket $connect route."""
+    return handleConnect(event, context)

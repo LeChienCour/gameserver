@@ -41,7 +41,7 @@ resource "aws_cloudwatch_event_rule" "audio_processing_rule" {
     source      = [var.event_source]
     detail-type = ["SendAudioEvent"]
     detail = {
-      status = ["PENDING"]
+      status = ["PENDING", "BROADCASTED"]
       message = {
         action = ["sendaudio"]
         data   = [{ "exists" : true }]

@@ -1,2 +1,2 @@
-boto3==1.26.137
-botocore==1.29.137 
+# boto3 and botocore are pre-installed in the AWS Lambda Python 3.12 runtime.
+# Do not bundle pinned boto3 versions inside deployment zip archives.

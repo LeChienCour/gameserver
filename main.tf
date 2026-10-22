@@ -82,6 +82,11 @@ resource "aws_dynamodb_table" "websocket_connections" {
     type = "S"
   }
 
+  ttl {
+    attribute_name = "ttl"
+    enabled        = true
+  }
+
   tags = {
     Name        = "${var.project_name}-${var.stage}-connections"
     Environment = var.environment
@@ -153,11 +158,18 @@ module "lambda" {
   environment               = var.environment
   stage                     = var.stage
   project_name              = var.project_name
+  enable_echo_mode          = var.enable_echo_mode
+  enable_direct_broadcast   = var.enable_direct_broadcast
 
   depends_on = [
     aws_s3_bucket.audio_storage,
     aws_s3_bucket_versioning.audio_storage,
-    aws_s3_bucket_server_side_encryption_configuration.audio_storage
+    aws_s3_bucket_server_side_encryption_configuration.audio_storage,
+    data.archive_file.connect_function,
+    data.archive_file.disconnect_function,
+    data.archive_file.message_function,
+    data.archive_file.process_audio_function,
+    data.archive_file.validate_audio_function
   ]
 }
 

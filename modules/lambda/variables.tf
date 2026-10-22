@@ -99,4 +99,22 @@ variable "audio_validation_rule_arn" {
 variable "stage" {
   description = "Deployment stage (e.g., dev, staging, prod)"
   type        = string
-} 
+}
+
+variable "lambda_runtime" {
+  description = "Python runtime version for Lambda functions"
+  type        = string
+  default     = "python3.12"
+}
+
+variable "enable_echo_mode" {
+  description = "Enable echo mode for audio broadcasting"
+  type        = bool
+  default     = true
+}
+
+variable "enable_direct_broadcast" {
+  description = "Enable low-latency direct broadcast in message Lambda before EventBridge archival"
+  type        = bool
+  default     = false
+}
