@@ -47,10 +47,12 @@ resource "aws_iam_role_policy" "game_server_policy" {
         Effect = "Allow"
         Action = [
           "ssm:GetParameter",
-          "ssm:GetParameters"
+          "ssm:GetParameters",
+          "ssm:GetParametersByPath"
         ]
         Resource = [
-          "arn:aws:ssm:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:parameter/game-server/*"
+          "arn:aws:ssm:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:parameter/game-server/*",
+          "arn:aws:ssm:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:parameter/gameserver/*"
         ]
       },
       {
@@ -58,9 +60,10 @@ resource "aws_iam_role_policy" "game_server_policy" {
         Action = [
           "logs:CreateLogGroup",
           "logs:CreateLogStream",
+          "logs:DescribeLogStreams",
           "logs:PutLogEvents"
         ]
-        Resource = "arn:aws:logs:*:*:*"
+        Resource = "arn:aws:logs:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:log-group:/minecraft/*"
       }
     ]
   })
@@ -70,6 +73,12 @@ resource "aws_iam_role_policy" "game_server_policy" {
 resource "aws_iam_role_policy_attachment" "ssm_policy" {
   role       = aws_iam_role.game_server_role.name
   policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
+}
+
+# Attach CloudWatch Agent Server Policy
+resource "aws_iam_role_policy_attachment" "cloudwatch_agent_policy" {
+  role       = aws_iam_role.game_server_role.name
+  policy_arn = "arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy"
 }
 
 # IAM Instance Profile
@@ -83,35 +92,38 @@ resource "aws_iam_instance_profile" "game_server_profile" {
   }
 }
 
-# Load user data script
-data "template_file" "user_data" {
-  template = file("${path.module}/templates/user_data.sh")
-
-  vars = {
-    game_port           = var.game_port
-    websocket_port      = var.websocket_port
-    user_pool_id        = var.user_pool_id
-    user_pool_client_id = var.user_pool_client_id
-    stage               = var.stage
-    environment         = var.environment
-  }
-}
-
 # EC2 Instance
 resource "aws_instance" "game_server" {
-  ami           = var.ami_id
-  instance_type = var.instance_type
+  ami                  = var.ami_id
+  instance_type        = var.instance_type
+  iam_instance_profile = aws_iam_instance_profile.game_server_profile.name
 
   subnet_id                   = var.subnet_id
   vpc_security_group_ids      = [var.security_group_id]
   associate_public_ip_address = true
   key_name                    = var.key_name
 
-  user_data = data.template_file.user_data.rendered
+  user_data = templatefile("${path.module}/templates/user_data.sh", {
+    game_port           = var.game_port
+    websocket_port      = var.websocket_port
+    user_pool_id        = var.user_pool_id
+    user_pool_client_id = var.user_pool_client_id
+    stage               = var.stage
+    environment         = var.environment
+    server_memory       = var.server_memory
+    neoforge_version    = var.neoforge_version
+  })
+
+  metadata_options {
+    http_endpoint               = "enabled"
+    http_tokens                 = "required"
+    http_put_response_hop_limit = 1
+  }
 
   root_block_device {
-    volume_size = 30
+    volume_size = var.root_volume_size
     volume_type = "gp3"
+    encrypted   = true
   }
 
   tags = {
@@ -145,6 +157,18 @@ resource "aws_cloudwatch_log_group" "minecraft_logs" {
 
   tags = {
     Name        = "minecraft-logs-${var.stage}"
+    Environment = var.environment
+    Stage       = var.stage
+    Managed_by  = "terraform"
+  }
+}
+
+resource "aws_cloudwatch_log_group" "minecraft_voice_logs" {
+  name              = "/minecraft/voice-chat/${var.stage}"
+  retention_in_days = var.log_retention_days
+
+  tags = {
+    Name        = "minecraft-voice-logs-${var.stage}"
     Environment = var.environment
     Stage       = var.stage
     Managed_by  = "terraform"

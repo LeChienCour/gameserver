@@ -1,8 +1,9 @@
 # WebSocket API Gateway
 resource "aws_apigatewayv2_api" "websocket" {
-  name                       = "${var.prefix}-websocket"
-  protocol_type              = "WEBSOCKET"
-  route_selection_expression = "$request.body.action"
+  name                         = "${var.prefix}-websocket"
+  protocol_type                = "WEBSOCKET"
+  route_selection_expression   = "$request.body.action"
+  api_key_selection_expression = "$request.header.x-api-key"
 
   tags = {
     Name        = "${var.prefix}-websocket"
