@@ -65,7 +65,7 @@ variable "user_pool_name" {
 
 # EC2 Instance Configuration
 variable "ami_id" {
-  description = "AMI ID for the EC2 instance (optional, will use latest Amazon Linux 2 if not specified)"
+  description = "AMI ID for the EC2 instance (optional, will use latest Amazon Linux 2023 matching architecture if not specified)"
   type        = string
   default     = null
 }
@@ -73,7 +73,7 @@ variable "ami_id" {
 variable "instance_type" {
   description = "Instance type for the EC2 instance"
   type        = string
-  default     = "t3.micro"
+  default     = "t4g.medium"
 }
 
 # EventBridge Configuration
@@ -148,15 +148,15 @@ variable "allowed_game_ips" {
 }
 
 variable "game_port" {
-  description = "Port for the game server"
+  description = "Port for the Minecraft game server"
   type        = number
-  default     = 7777
+  default     = 25565
 }
 
 variable "game_protocol" {
-  description = "Protocol for the game server"
+  description = "Protocol for the Minecraft game server"
   type        = string
-  default     = "udp"
+  default     = "tcp"
 }
 
 variable "security_group_name" {
@@ -182,6 +182,18 @@ variable "audio_bucket_name" {
   description = "Name of the S3 bucket for audio storage"
   type        = string
   default     = "gameserver-audio-storage"
+}
+
+variable "audio_retention_days" {
+  description = "Number of days to retain raw audio chunks in S3"
+  type        = number
+  default     = 7
+}
+
+variable "connections_table" {
+  description = "Base name for the DynamoDB WebSocket connections table"
+  type        = string
+  default     = "voice-chat-connections"
 }
 
 # VPC and Network Configuration

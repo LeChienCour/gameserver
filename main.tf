@@ -12,11 +12,20 @@ terraform {
       source  = "hashicorp/aws"
       version = "~> 5.0"
     }
+    archive = {
+      source  = "hashicorp/archive"
+      version = "~> 2.4"
+    }
   }
 }
 
 provider "aws" {
   region = var.region
+}
+
+locals {
+  is_arm_instance = can(regex("^(t4g|m6g|m7g|c6g|c7g|r6g|r7g)\\.", var.instance_type))
+  ami_arch        = local.is_arm_instance ? "arm64" : "x86_64"
 }
 
 # Data Sources
@@ -27,14 +36,14 @@ data "aws_ssm_parameter" "key_pair" {
   name = "/gameserver/ec2/key_pair"
 }
 
-# Find latest Amazon Linux 2 AMI
-data "aws_ami" "amazon_linux_2" {
+# Find latest Amazon Linux 2023 AMI matching the instance architecture
+data "aws_ami" "amazon_linux" {
   most_recent = true
   owners      = ["amazon"]
 
   filter {
     name   = "name"
-    values = ["amzn2-ami-hvm-*-x86_64-gp2"]
+    values = ["al2023-ami-2023.*-kernel-6.1-${local.ami_arch}"]
   }
 
   filter {
@@ -99,7 +108,7 @@ resource "aws_dynamodb_table" "websocket_connections" {
 # EC2 Module
 module "ec2_game_server" {
   source              = "./modules/ec2"
-  ami_id              = var.ami_id != null ? var.ami_id : data.aws_ami.amazon_linux_2.id
+  ami_id              = var.ami_id != null ? var.ami_id : data.aws_ami.amazon_linux.id
   instance_type       = var.instance_type
   subnet_id           = module.vpc.public_subnets_ids[0]
   security_group_id   = module.security_groups.game_server_sg_id
@@ -220,7 +229,7 @@ module "security_groups" {
   websocket_port      = var.websocket_port
   ssh_cidr            = var.ssh_cidr
   security_group_name = var.security_group_name
-  allowed_game_ips    = ["0.0.0.0/0"]
+  allowed_game_ips    = var.allowed_game_ips
   game_protocol       = var.game_protocol
   stage               = var.stage
   environment         = var.environment
@@ -242,6 +251,28 @@ resource "aws_s3_bucket_versioning" "audio_storage" {
   bucket = aws_s3_bucket.audio_storage.id
   versioning_configuration {
     status = "Enabled"
+  }
+}
+
+# Lifecycle rule to expire temporary raw PCM audio chunks after retention period
+resource "aws_s3_bucket_lifecycle_configuration" "audio_storage" {
+  bucket = aws_s3_bucket.audio_storage.id
+
+  rule {
+    id     = "expire-raw-audio-chunks"
+    status = "Enabled"
+
+    filter {
+      prefix = "audio/"
+    }
+
+    expiration {
+      days = var.audio_retention_days
+    }
+
+    noncurrent_version_expiration {
+      noncurrent_days = 7
+    }
   }
 }
 

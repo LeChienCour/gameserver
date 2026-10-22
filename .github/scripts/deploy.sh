@@ -1,122 +1,155 @@
-#!/bin/bash
-set -e
+#!/usr/bin/env bash
+# ==============================================================================
+# Script Name: deploy.sh
+# Description: Deploys the VoiceChatMod JAR and configuration to the EC2 server
+# ==============================================================================
+set -euo pipefail
 
-echo "Starting deployment..."
+readonly MINECRAFT_DIR="/opt/minecraft"
+readonly MODS_DIR="${MINECRAFT_DIR}/mods"
+readonly CONFIG_DIR="${MINECRAFT_DIR}/runs/client/config"
+readonly SSH_KEY_PATH="$HOME/.ssh/game_server_key"
 
-# Set up SSH key for deployment with proper RSA format
-mkdir -p ~/.ssh
-echo "-----BEGIN RSA PRIVATE KEY-----" > ~/.ssh/game_server_key
-echo "$SSH_PRIVATE_KEY" | fold -w 64 >> ~/.ssh/game_server_key
-echo "-----END RSA PRIVATE KEY-----" >> ~/.ssh/game_server_key
-chmod 600 ~/.ssh/game_server_key
+cleanupOnExit() {
+  rm -f "$SSH_KEY_PATH" voicechatmod-common.toml
+}
+trap cleanupOnExit EXIT
 
-# Get instance public IP
-if [ -z "$INSTANCE_IP" ]; then
-    echo "::error::INSTANCE_IP environment variable is required but not set. This should be provided from Terraform outputs."
+validateEnv() {
+  if [ -z "${INSTANCE_IP:-}" ]; then
+    echo "::error::INSTANCE_IP environment variable is required but not set." >&2
     exit 1
-fi
-
-echo "Using instance IP: $INSTANCE_IP"
-
-# Function to safely get SSM parameter with fallback
-get_ssm_param() {
-    local param_name=$1
-    local fallback_value=$2
-    local value
-
-    # Try to get from SSM
-    if value=$(aws ssm get-parameter --name "$param_name" --with-decryption --query 'Parameter.Value' --output text 2>/dev/null); then
-        echo "$value"
-    else
-        echo "$fallback_value"
-    fi
+  fi
+  if [ -z "${SSH_PRIVATE_KEY:-}" ]; then
+    echo "::error::SSH_PRIVATE_KEY environment variable is required but not set." >&2
+    exit 1
+  fi
 }
 
-# Determine the stage
-if [ -n "$PR_NUMBER" ]; then
+setupSshKey() {
+  mkdir -p "$HOME/.ssh"
+  {
+    echo "-----BEGIN RSA PRIVATE KEY-----"
+    echo "$SSH_PRIVATE_KEY" | fold -w 64
+    echo "-----END RSA PRIVATE KEY-----"
+  } > "$SSH_KEY_PATH"
+  chmod 600 "$SSH_KEY_PATH"
+}
+
+getSsmParam() {
+  local paramName=$1
+  local fallbackValue=$2
+  local value
+
+  if value=$(aws ssm get-parameter --name "$paramName" --with-decryption --query 'Parameter.Value' --output text 2>/dev/null); then
+    echo "$value"
+  else
+    echo "$fallbackValue"
+  fi
+}
+
+resolveStage() {
+  if [ -n "${PR_NUMBER:-}" ]; then
     STAGE="pr-${PR_NUMBER}"
-elif [ -n "$STAGE" ]; then
-    # Validate stage name
+  elif [ -n "${STAGE:-}" ]; then
     case "$STAGE" in
-        "dev"|"qa"|"prod")
-            echo "Using provided stage: $STAGE"
-            ;;
-        *)
-            echo "::error::Invalid stage name: $STAGE. Must be one of: dev, qa, prod"
-            exit 1
-            ;;
+      "dev"|"qa"|"prod"|"pr-"*)
+        ;;
+      *)
+        echo "::error::Invalid stage name: $STAGE" >&2
+        exit 1
+        ;;
     esac
-else
-    echo "No stage specified, defaulting to dev"
+  else
     STAGE="dev"
-fi
+  fi
+  echo "$STAGE"
+}
 
-echo "Using stage: $STAGE"
+generateModConfig() {
+  local stage=$1
+  local defaultWsUrl="wss://${stage}-api.gameserver.example.com"
 
-# Set appropriate default values based on stage
-case "$STAGE" in
-    "prod")
-        DEFAULT_WS_URL="wss://api.gameserver.example.com"
-        ;;
-    "qa")
-        DEFAULT_WS_URL="wss://qa-api.gameserver.example.com"
-        ;;
-    "pr-"*)
-        DEFAULT_WS_URL="wss://${STAGE}-api.gameserver.example.com"
-        ;;
-    *)  # dev and any other case
-        DEFAULT_WS_URL="wss://dev-api.gameserver.example.com"
-        ;;
-esac
+  local websocketUrl
+  local apiKey
+  local userPoolId
+  local userPoolClientId
 
-# Get configuration values from SSM or use defaults
-WEBSOCKET_URL=$(get_ssm_param "/gameserver/$STAGE/websocket/stage_url" "$DEFAULT_WS_URL")
-API_KEY=$(get_ssm_param "/gameserver/$STAGE/websocket/api_key" "dev-key")
-USER_POOL_ID=$(get_ssm_param "/gameserver/$STAGE/cognito/user_pool_id" "us-east-1_dev")
-USER_POOL_CLIENT_ID=$(get_ssm_param "/gameserver/$STAGE/cognito/user_pool_client_id" "dev-client")
+  websocketUrl=$(getSsmParam "/game-server/${stage}/websocket/stage-url" "$defaultWsUrl")
+  apiKey=$(getSsmParam "/game-server/${stage}/websocket/api-key" "dev-key")
+  userPoolId=$(getSsmParam "/game-server/${stage}/cognito/user-pool-id" "us-east-1_dev")
+  userPoolClientId=$(getSsmParam "/game-server/${stage}/cognito/user-pool-client-id" "dev-client")
 
-# Create voice chat configuration
-echo "Creating voice chat configuration..."
-cat > voicechatmod.toml << EOF
+  cat > voicechatmod-common.toml << EOF
 # Voice Chat Mod Configuration
 enableVoiceChat = true
-defaultVolume = 1.0
-websocketStageUrl = "$WEBSOCKET_URL"
-apiKey = "$API_KEY"
-userPoolId = "$USER_POOL_ID"
-userPoolClientId = "$USER_POOL_CLIENT_ID"
+defaultVolume = 0.7
+maxVoiceDistance = 64
+reconnectionAttempts = 3
+reconnectionDelay = 5
+websocketStageUrl = "${websocketUrl}"
+websocketApiKey = "${apiKey}"
+userPoolId = "${userPoolId}"
+userPoolClientId = "${userPoolClientId}"
+selectedMicrophone = ""
+useSystemDefaultMic = true
+microphoneBoost = 1.0
 EOF
+}
 
-# Copy mod files to instance
-echo "Copying mod files to instance..."
-scp -i ~/.ssh/game_server_key -o StrictHostKeyChecking=no voicechatmod.toml ec2-user@$INSTANCE_IP:/home/ec2-user/minecraft/config/
-scp -i ~/.ssh/game_server_key -o StrictHostKeyChecking=no mod_source/build/libs/*.jar ec2-user@$INSTANCE_IP:/home/ec2-user/minecraft/mods/
+deployToServer() {
+  local modSourceGlob=${MOD_JAR_GLOB:-"VoiceChatMod/build/libs/*.jar"}
 
-# Set permissions
-echo "Setting permissions..."
-ssh -i ~/.ssh/game_server_key -o StrictHostKeyChecking=no ec2-user@$INSTANCE_IP "chmod 644 /home/ec2-user/minecraft/config/voicechatmod.toml /home/ec2-user/minecraft/mods/*.jar"
+  echo "Preparing remote directories on ${INSTANCE_IP}..."
+  ssh -i "$SSH_KEY_PATH" -o StrictHostKeyChecking=no "ec2-user@${INSTANCE_IP}" \
+    "sudo mkdir -p ${MODS_DIR} ${CONFIG_DIR} && sudo chown -R ec2-user:ec2-user ${MINECRAFT_DIR}"
 
-# Restart Minecraft server and CloudWatch agent
-echo "Restarting services..."
-ssh -i ~/.ssh/game_server_key -o StrictHostKeyChecking=no ec2-user@$INSTANCE_IP "sudo systemctl restart minecraft && sudo systemctl restart amazon-cloudwatch-agent"
+  echo "Copying configuration and mod JARs to ${INSTANCE_IP}..."
+  scp -i "$SSH_KEY_PATH" -o StrictHostKeyChecking=no voicechatmod-common.toml "ec2-user@${INSTANCE_IP}:${CONFIG_DIR}/voicechatmod-common.toml"
+  # shellcheck disable=SC2086
+  scp -i "$SSH_KEY_PATH" -o StrictHostKeyChecking=no $modSourceGlob "ec2-user@${INSTANCE_IP}:${MODS_DIR}/"
 
-# Wait for server to start and mod to load
-echo "Waiting for server to start..."
-MAX_ATTEMPTS=60
-ATTEMPT=0
-while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
-    if ssh -i ~/.ssh/game_server_key -o StrictHostKeyChecking=no ec2-user@$INSTANCE_IP "sudo journalctl -u minecraft -n 50 | grep -q 'VoiceChatMod loaded successfully'"; then
-        echo "✅ Server started and mod loaded successfully"
-        echo "::set-output name=status::success"
-        echo "::set-output name=message::Server running successfully with mod deployed"
-        exit 0
+  ssh -i "$SSH_KEY_PATH" -o StrictHostKeyChecking=no "ec2-user@${INSTANCE_IP}" \
+    "sudo chmod 644 ${CONFIG_DIR}/voicechatmod-common.toml ${MODS_DIR}/*.jar"
+
+  echo "Restarting Minecraft and CloudWatch services..."
+  ssh -i "$SSH_KEY_PATH" -o StrictHostKeyChecking=no "ec2-user@${INSTANCE_IP}" \
+    "sudo systemctl restart minecraft && sudo systemctl restart amazon-cloudwatch-agent"
+}
+
+waitForServerReady() {
+  echo "Waiting for Minecraft service to become active..."
+  local maxAttempts=30
+  local attempt=0
+
+  while [ "$attempt" -lt "$maxAttempts" ]; do
+    if ssh -i "$SSH_KEY_PATH" -o StrictHostKeyChecking=no "ec2-user@${INSTANCE_IP}" \
+      "sudo systemctl is-active --quiet minecraft"; then
+      echo "✅ Minecraft service is active"
+      if [ -n "${GITHUB_OUTPUT:-}" ]; then
+        echo "status=success" >> "$GITHUB_OUTPUT"
+        echo "message=Server running successfully with mod deployed" >> "$GITHUB_OUTPUT"
+      fi
+      return 0
     fi
-    ATTEMPT=$((ATTEMPT + 1))
+    attempt=$((attempt + 1))
     sleep 5
-done
+  done
 
-echo "❌ Server failed to start or mod failed to load"
-exit 1
+  echo "❌ Minecraft server failed to reach active state" >&2
+  return 1
+}
 
-# Clean up SSH key
-rm -f ~/.ssh/game_server_key 
+main() {
+  echo "Starting deployment..."
+  validateEnv
+  setupSshKey
+  local currentStage
+  currentStage=$(resolveStage)
+  echo "Deploying for stage: $currentStage"
+  generateModConfig "$currentStage"
+  deployToServer
+  waitForServerReady
+}
+
+main "$@"
