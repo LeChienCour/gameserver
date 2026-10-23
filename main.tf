@@ -31,13 +31,15 @@ locals {
 # Data Sources
 data "aws_caller_identity" "current" {}
 
-# Get key pair name from SSM parameter
+# Get key pair name from SSM parameter (only required when EC2 server is enabled)
 data "aws_ssm_parameter" "key_pair" {
-  name = "/gameserver/ec2/key_pair"
+  count = var.enable_ec2_server ? 1 : 0
+  name  = "/gameserver/ec2/key_pair"
 }
 
 # Find latest Amazon Linux 2023 AMI matching the instance architecture
 data "aws_ami" "amazon_linux" {
+  count       = var.enable_ec2_server ? 1 : 0
   most_recent = true
   owners      = ["amazon"]
 
@@ -67,10 +69,6 @@ module "api_gateway" {
   lambda_message_arn           = module.lambda.lambda_functions["message"]
   lambda_authorizer_invoke_arn = module.lambda.authorizer_invoke_arn
   enable_custom_authorizer     = var.enable_custom_authorizer
-
-  depends_on = [
-    module.vpc
-  ]
 }
 
 # Cognito Module
@@ -105,18 +103,19 @@ resource "aws_dynamodb_table" "websocket_connections" {
   }
 }
 
-# EC2 Module
+# EC2 Module (Optional: set enable_ec2_server = false for $0/idle Serverless Voice-Only mode)
 module "ec2_game_server" {
+  count               = var.enable_ec2_server ? 1 : 0
   source              = "./modules/ec2"
-  ami_id              = var.ami_id != null ? var.ami_id : data.aws_ami.amazon_linux.id
+  ami_id              = var.ami_id != null ? var.ami_id : data.aws_ami.amazon_linux[0].id
   instance_type       = var.instance_type
-  subnet_id           = module.vpc.public_subnets_ids[0]
-  security_group_id   = module.security_groups.game_server_sg_id
+  subnet_id           = module.vpc[0].public_subnets_ids[0]
+  security_group_id   = module.security_groups[0].game_server_sg_id
   game_port           = var.game_port
   websocket_port      = var.websocket_port
   user_pool_id        = module.cognito.user_pool_id
   user_pool_client_id = module.cognito.user_pool_client_id
-  key_name            = data.aws_ssm_parameter.key_pair.value
+  key_name            = data.aws_ssm_parameter.key_pair[0].value
   stage               = var.stage
   environment         = var.environment
   audio_bucket_name   = aws_s3_bucket.audio_storage.id
@@ -172,6 +171,8 @@ module "lambda" {
   project_name              = var.project_name
   enable_echo_mode          = var.enable_echo_mode
   enable_direct_broadcast   = var.enable_direct_broadcast
+  enable_audio_archival     = var.enable_audio_archival
+  max_voice_distance        = var.max_voice_distance
 
   depends_on = [
     aws_s3_bucket.audio_storage,
@@ -225,8 +226,9 @@ data "archive_file" "validate_audio_function" {
 
 # Security Groups Module
 module "security_groups" {
+  count               = var.enable_ec2_server ? 1 : 0
   source              = "./modules/security_groups"
-  vpc_id              = module.vpc.vpc_id
+  vpc_id              = module.vpc[0].vpc_id
   game_port           = var.game_port
   websocket_port      = var.websocket_port
   ssh_cidr            = var.ssh_cidr
@@ -301,6 +303,7 @@ resource "aws_s3_bucket_public_access_block" "audio_storage" {
 
 # VPC Module
 module "vpc" {
+  count               = var.enable_ec2_server ? 1 : 0
   source              = "./modules/vpc"
   vpc_cidr            = var.vpc_cidr
   public_subnets_cidr = var.public_subnets_cidr
@@ -329,7 +332,7 @@ module "monitoring" {
   stage                 = var.stage
   environment           = var.environment
   region                = var.region
-  instance_id           = module.ec2_game_server.instance_id
+  instance_id           = var.enable_ec2_server ? module.ec2_game_server[0].instance_id : null
   websocket_api_id      = module.api_gateway.api_id
   event_dlq_name        = module.eventbridge.event_dlq_name
   lambda_function_names = module.lambda.lambda_function_names

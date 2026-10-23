@@ -7,15 +7,16 @@ public_subnets_cidr = ["10.0.101.0/24", "10.0.102.0/24", "10.0.103.0/24"]
 availability_zones  = ["us-east-1a", "us-east-1b", "us-east-1c"]
 vpc_name            = "game-server-vpc"
 
-# Security Configuration
+# Security Configuration (ssh_cidr = "" disables port 22 and uses SSM Session Manager)
 security_group_name = "game-server-sg"
 game_port           = 25565
-ssh_cidr            = "0.0.0.0/0"
+ssh_cidr            = ""
 game_protocol       = "tcp"
 
-# EC2 Configuration (null ami_id auto-selects latest AL2023 matching instance_type arch)
-ami_id        = null
-instance_type = "t4g.medium"
+# EC2 Configuration (set enable_ec2_server = false for $0/idle Serverless Voice-Only mode)
+enable_ec2_server = true
+ami_id            = null
+instance_type     = "t4g.medium"
 
 # Cognito Configuration
 user_pool_name  = "game-users"
@@ -52,7 +53,9 @@ lambda_functions = {
   authorizer     = "lambda/authorizer.zip"
 }
 
-# Feature Flags
+# Feature & FinOps Flags
 enable_echo_mode         = true
 enable_direct_broadcast  = true
+enable_audio_archival    = false
+max_voice_distance       = 64
 enable_custom_authorizer = false

@@ -6,7 +6,7 @@ output "dashboard_name" {
 output "alarm_arns" {
   description = "Map of CloudWatch alarm ARNs"
   value = {
-    ec2_high_cpu          = aws_cloudwatch_metric_alarm.ec2_high_cpu.arn
+    ec2_high_cpu          = length(aws_cloudwatch_metric_alarm.ec2_high_cpu) > 0 ? aws_cloudwatch_metric_alarm.ec2_high_cpu[0].arn : null
     event_dlq_messages    = aws_cloudwatch_metric_alarm.event_dlq_messages.arn
     message_lambda_errors = aws_cloudwatch_metric_alarm.message_lambda_errors.arn
   }

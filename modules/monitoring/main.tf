@@ -1,6 +1,7 @@
 # CloudWatch Alarms and Unified Dashboard for Game Server & Voice Pipeline
 
 resource "aws_cloudwatch_metric_alarm" "ec2_high_cpu" {
+  count               = var.instance_id != null ? 1 : 0
   alarm_name          = "${var.prefix}-ec2-high-cpu"
   comparison_operator = "GreaterThanThreshold"
   evaluation_periods  = 2
@@ -109,23 +110,7 @@ resource "aws_cloudwatch_dashboard" "main" {
         type   = "metric"
         x      = 0
         y      = 6
-        width  = 12
-        height = 6
-        properties = {
-          title  = "Minecraft Server EC2 CPU (%)"
-          region = var.region
-          stat   = "Average"
-          period = 60
-          metrics = [
-            ["AWS/EC2", "CPUUtilization", "InstanceId", var.instance_id]
-          ]
-        }
-      },
-      {
-        type   = "metric"
-        x      = 12
-        y      = 6
-        width  = 12
+        width  = 24
         height = 6
         properties = {
           title  = "EventBridge DLQ Depth"
