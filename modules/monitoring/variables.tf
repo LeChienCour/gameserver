@@ -21,8 +21,9 @@ variable "region" {
 }
 
 variable "instance_id" {
-  description = "EC2 instance ID of the Minecraft server"
+  description = "EC2 instance ID of the Minecraft server (null when enable_ec2_server is false)"
   type        = string
+  default     = null
 }
 
 variable "websocket_api_id" {

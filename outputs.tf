@@ -53,7 +53,7 @@ output "console_urls" {
   value = {
     cloudwatch_logs = "https://${var.region}.console.aws.amazon.com/cloudwatch/home?region=${var.region}#logsV2:log-groups/log-group/${replace(module.eventbridge.log_group_name, "/", "$252F")}"
     cognito         = "https://${var.region}.console.aws.amazon.com/cognito/v2/idp/user-pools/${module.cognito.user_pool_id}/users?region=${var.region}"
-    ec2             = "https://${var.region}.console.aws.amazon.com/ec2/v2/home?region=${var.region}#Instances:instanceId=${module.ec2_game_server.instance_id}"
+    ec2             = var.enable_ec2_server ? "https://${var.region}.console.aws.amazon.com/ec2/v2/home?region=${var.region}#Instances:instanceId=${module.ec2_game_server[0].instance_id}" : null
     eventbridge     = "https://${var.region}.console.aws.amazon.com/events/home?region=${var.region}#/eventbuses/${var.event_bus_name}"
   }
 }
@@ -68,8 +68,8 @@ output "connections_table_name" {
 output "game_server_connection_info" {
   description = "Game server connection information"
   value = {
-    instance_id   = module.ec2_game_server.instance_id
-    public_ip     = module.ec2_game_server.instance_public_ip
+    instance_id   = var.enable_ec2_server ? module.ec2_game_server[0].instance_id : null
+    public_ip     = var.enable_ec2_server ? module.ec2_game_server[0].instance_public_ip : null
     game_port     = var.game_port
     websocket_url = module.api_gateway.api_endpoint
   }
@@ -77,17 +77,17 @@ output "game_server_connection_info" {
 
 output "game_server_private_ip" {
   description = "Private IP address of the game server"
-  value       = module.ec2_game_server.instance_private_ip
+  value       = var.enable_ec2_server ? module.ec2_game_server[0].instance_private_ip : null
 }
 
 output "game_server_security_group_id" {
   description = "Security group ID for the game server"
-  value       = module.security_groups.game_server_sg_id
+  value       = var.enable_ec2_server ? module.security_groups[0].game_server_sg_id : null
 }
 
 output "game_server_instance_role_arn" {
   description = "ARN of the IAM role attached to the game server instance"
-  value       = module.ec2_game_server.instance_role_arn
+  value       = var.enable_ec2_server ? module.ec2_game_server[0].instance_role_arn : null
 }
 
 # EventBridge Information
@@ -206,18 +206,18 @@ output "audio_bucket_name" {
 # VPC Information
 output "public_subnets" {
   description = "List of public subnet IDs"
-  value       = module.vpc.public_subnets_ids
+  value       = var.enable_ec2_server ? module.vpc[0].public_subnets_ids : []
 }
 
 output "vpc_id" {
   description = "The ID of the VPC"
-  value       = module.vpc.vpc_id
+  value       = var.enable_ec2_server ? module.vpc[0].vpc_id : null
 }
 
 # EC2 Instance Outputs
 output "instance_public_ip" {
   description = "The public IP address of the game server instance"
-  value       = module.ec2_game_server.instance_public_ip
+  value       = var.enable_ec2_server ? module.ec2_game_server[0].instance_public_ip : null
 }
 
 # Other useful outputs

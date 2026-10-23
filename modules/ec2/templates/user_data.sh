@@ -131,6 +131,71 @@ EOF
   systemctl start minecraft-backup.timer
 }
 
+configureIdleAutoShutdownTimer() {
+  echo "Configuring idle player check and auto-shutdown timer (cost optimization)..."
+  cat > /usr/local/bin/check_minecraft_idle.sh << EOF
+#!/usr/bin/env bash
+set -euo pipefail
+
+readonly GAME_PORT="${GAME_PORT}"
+readonly IDLE_STATE_FILE="/tmp/minecraft_empty_checks"
+readonly MAX_EMPTY_CHECKS=2 # 2 checks * 15 min = 30 minutes idle before shutdown
+
+if ! systemctl is-active --quiet minecraft; then
+  exit 0
+fi
+
+# Count established TCP connections on the Minecraft game port
+activePlayers=\$(ss -tn state established "( sport = :\${GAME_PORT} )" | tail -n +2 | wc -l)
+
+if [ "\$activePlayers" -gt 0 ]; then
+  echo 0 > "\$IDLE_STATE_FILE"
+  exit 0
+fi
+
+emptyCount=0
+if [ -f "\$IDLE_STATE_FILE" ]; then
+  emptyCount=\$(cat "\$IDLE_STATE_FILE")
+fi
+emptyCount=\$((emptyCount + 1))
+echo "\$emptyCount" > "\$IDLE_STATE_FILE"
+
+if [ "\$emptyCount" -ge "\$MAX_EMPTY_CHECKS" ]; then
+  echo "No players connected for 30 minutes. Backing up world and shutting down instance to save costs..."
+  /usr/local/bin/backup_minecraft_world.sh "${AUDIO_BUCKET_NAME}" "${STAGE}" || true
+  rm -f "\$IDLE_STATE_FILE"
+  /sbin/shutdown -h now "Auto-shutdown due to 30 minutes of player inactivity"
+fi
+EOF
+  chmod +x /usr/local/bin/check_minecraft_idle.sh
+
+  cat > /etc/systemd/system/minecraft-idle-check.service << 'EOF'
+[Unit]
+Description=Check Minecraft Server Player Activity for Cost-Saving Auto-Shutdown
+
+[Service]
+Type=oneshot
+User=root
+ExecStart=/usr/local/bin/check_minecraft_idle.sh
+EOF
+
+  cat > /etc/systemd/system/minecraft-idle-check.timer << 'EOF'
+[Unit]
+Description=Run Minecraft Idle Check every 15 minutes
+
+[Timer]
+OnBootSec=20min
+OnUnitActiveSec=15min
+
+[Install]
+WantedBy=timers.target
+EOF
+
+  systemctl daemon-reload
+  systemctl enable minecraft-idle-check.timer
+  systemctl start minecraft-idle-check.timer
+}
+
 configureCloudWatchAgent() {
   echo "Configuring Amazon CloudWatch Agent..."
   mkdir -p /opt/aws/amazon-cloudwatch-agent/etc
@@ -207,6 +272,7 @@ main() {
   setupDirectories
   installNeoForge
   configureWorldBackupTimer
+  configureIdleAutoShutdownTimer
   configureCloudWatchAgent
   configureSystemdService
   echo "Instance setup completed successfully!"

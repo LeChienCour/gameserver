@@ -3,6 +3,7 @@
 import json
 import logging
 import os
+import re
 import time
 from datetime import datetime, timezone
 from typing import Any, Dict
@@ -32,6 +33,29 @@ def getDynamodbTable() -> Any:
     if _dynamodbResource is None:
         _dynamodbResource = boto3.resource("dynamodb")
     return _dynamodbResource.Table(tableName)
+
+
+def sanitizeRoomId(roomId: str) -> str:
+    """Sanitize room or server identifier."""
+    cleaned = re.sub(r"[^a-zA-Z0-9._:-]", "_", (roomId or "global").strip())
+    return cleaned[:64] or "global"
+
+
+def extractRoomId(event: Dict[str, Any]) -> str:
+    """Extract roomId from queryStringParameters or headers (defaults to 'global')."""
+    queryParams = event.get("queryStringParameters") or {}
+    if isinstance(queryParams, dict):
+        for key in ("room", "roomId", "server"):
+            if queryParams.get(key):
+                return sanitizeRoomId(str(queryParams[key]))
+
+    headers = event.get("headers") or {}
+    if isinstance(headers, dict):
+        for key, value in headers.items():
+            if key.lower() in ("x-room-id", "x-server-id") and value:
+                return sanitizeRoomId(str(value))
+
+    return "global"
 
 
 def buildResponse(statusCode: int, body: Any) -> Dict[str, Any]:
@@ -64,19 +88,21 @@ def handleConnect(event: Dict[str, Any], context: Any = None) -> Dict[str, Any]:
 
     currentTimestamp = datetime.now(timezone.utc).isoformat()
     ttlEpoch = int(time.time()) + CONNECTION_TTL_SECONDS
+    roomId = extractRoomId(event)
 
     connectionItem: Dict[str, Any] = {
         "connectionId": connectionId,
         "connectedAt": currentTimestamp,
         "domain": domainName,
         "stage": stage,
+        "roomId": roomId,
         "ttl": ttlEpoch,
     }
 
     try:
         logger.info("Storing connection item: %s", json.dumps(connectionItem))
         connectionsTable.put_item(Item=connectionItem)
-        logger.info("Connection %s stored successfully.", connectionId)
+        logger.info("Connection %s stored successfully in room %s.", connectionId, roomId)
         return buildResponse(200, "Connected.")
     except ClientError as err:
         logger.error("DynamoDB error storing connection %s: %s", connectionId, err)

@@ -64,6 +64,12 @@ variable "user_pool_name" {
 }
 
 # EC2 Instance Configuration
+variable "enable_ec2_server" {
+  description = "Deploy the dedicated EC2 Minecraft server and VPC (set false for $0/idle Serverless Voice-Only mode)"
+  type        = bool
+  default     = true
+}
+
 variable "ami_id" {
   description = "AMI ID for the EC2 instance (optional, will use latest Amazon Linux 2023 matching architecture if not specified)"
   type        = string
@@ -101,7 +107,7 @@ variable "log_retention_days" {
   default     = 30
 }
 
-# Feature Flags
+# Feature & FinOps Flags
 variable "enable_echo_mode" {
   description = "Enable echo mode for audio processing"
   type        = bool
@@ -112,6 +118,18 @@ variable "enable_direct_broadcast" {
   description = "Enable low-latency direct broadcast in message Lambda before EventBridge archival"
   type        = bool
   default     = true
+}
+
+variable "enable_audio_archival" {
+  description = "Publish audio packets to EventBridge/S3 for archival (disable in prod to save 100% S3 PUT & EventBridge costs)"
+  type        = bool
+  default     = false
+}
+
+variable "max_voice_distance" {
+  description = "Maximum 3D block distance for proximity voice filtering (0 = global)"
+  type        = number
+  default     = 64
 }
 
 variable "enable_custom_authorizer" {

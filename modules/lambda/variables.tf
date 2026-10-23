@@ -49,23 +49,23 @@ variable "project_name" {
   type        = string
 }
 
-# Lambda Function Configuration
+# Lambda Function Configuration (Right-sized for cost efficiency on Graviton2 ARM64)
 variable "process_audio_timeout" {
   description = "Timeout for the process audio Lambda function in seconds"
   type        = number
-  default     = 300
+  default     = 15
 }
 
 variable "process_audio_memory" {
   description = "Memory allocation for the process audio Lambda function in MB"
   type        = number
-  default     = 1024
+  default     = 256
 }
 
 variable "validate_audio_timeout" {
   description = "Timeout for the validate audio Lambda function in seconds"
   type        = number
-  default     = 30
+  default     = 15
 }
 
 variable "validate_audio_memory" {
@@ -77,7 +77,7 @@ variable "validate_audio_memory" {
 variable "websocket_timeout" {
   description = "Timeout for WebSocket Lambda functions in seconds"
   type        = number
-  default     = 30
+  default     = 15
 }
 
 variable "websocket_memory" {
@@ -107,6 +107,12 @@ variable "lambda_runtime" {
   default     = "python3.12"
 }
 
+variable "lambda_architecture" {
+  description = "Instruction set architecture for Lambda functions (arm64 saves 20% cost on Graviton2)"
+  type        = string
+  default     = "arm64"
+}
+
 variable "enable_echo_mode" {
   description = "Enable echo mode for audio broadcasting"
   type        = bool
@@ -116,7 +122,19 @@ variable "enable_echo_mode" {
 variable "enable_direct_broadcast" {
   description = "Enable low-latency direct broadcast in message Lambda before EventBridge archival"
   type        = bool
+  default     = true
+}
+
+variable "enable_audio_archival" {
+  description = "Publish audio packets to EventBridge/S3 for archival (disable to save 100% S3 PUT & EventBridge costs)"
+  type        = bool
   default     = false
+}
+
+variable "max_voice_distance" {
+  description = "Maximum 3D block distance for proximity voice filtering (0 = global)"
+  type        = number
+  default     = 64
 }
 
 variable "log_retention_days" {

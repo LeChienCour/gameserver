@@ -226,6 +226,97 @@ class TestMessageLambda(unittest.TestCase):
         detail = json.loads(publishedEntry["Detail"])
         self.assertEqual(detail["status"], "BROADCASTED")
 
+    @patch.dict(
+        os.environ,
+        {
+            "CONNECTIONS_TABLE": "test-connections",
+            "EVENT_BUS_NAME": "test-bus",
+            "DIRECT_BROADCAST": "true",
+            "ENABLE_AUDIO_ARCHIVAL": "false",
+            "ECHO_MODE": "false",
+            "MAX_VOICE_DISTANCE": "64",
+            "CONNECTIONS_CACHE_TTL_SECONDS": "10.0",
+        },
+    )
+    def testFinOpsCacheProximityRoomAndZeroArchival(self) -> None:
+        """Verify in-memory cache (1 scan for 2 packets), room/3D proximity filter, and skipped EventBridge."""
+        messageMod = loadLambdaModule("message")
+
+        mockTable = MagicMock()
+        mockTable.scan.return_value = {
+            "Items": [
+                {
+                    "connectionId": "conn-sender",
+                    "roomId": "hypixel-1",
+                    "dimension": "minecraft:overworld",
+                    "position": {"x": 0, "y": 64, "z": 0},
+                },
+                {
+                    "connectionId": "conn-nearby",
+                    "roomId": "hypixel-1",
+                    "dimension": "minecraft:overworld",
+                    "position": {"x": 20, "y": 64, "z": 10},
+                },
+                {
+                    "connectionId": "conn-far",
+                    "roomId": "hypixel-1",
+                    "dimension": "minecraft:overworld",
+                    "position": {"x": 200, "y": 64, "z": 200},
+                },
+                {
+                    "connectionId": "conn-other-server",
+                    "roomId": "mineplex-2",
+                    "dimension": "minecraft:overworld",
+                    "position": {"x": 5, "y": 64, "z": 5},
+                },
+            ]
+        }
+        mockApigw = MagicMock()
+        mockEvents = MagicMock()
+
+        with (
+            patch.object(messageMod, "getDynamodbTable", return_value=mockTable),
+            patch.object(
+                messageMod, "getApiGatewayManagementClient", return_value=mockApigw
+            ),
+            patch.object(messageMod, "getEventsClient", return_value=mockEvents),
+        ):
+            validAudio = base64.b64encode(b"\x00\x01" * 512).decode("utf-8")
+            event = {
+                "requestContext": {
+                    "connectionId": "conn-sender",
+                    "domainName": "ws.example.com",
+                    "stage": "dev",
+                },
+                "body": json.dumps(
+                    {
+                        "action": "sendaudio",
+                        "data": validAudio,
+                        "author": "Steve",
+                        "room": "hypixel-1",
+                        "dimension": "minecraft:overworld",
+                        "position": {"x": 0, "y": 64, "z": 0},
+                        "codec": "opus",
+                    }
+                ),
+            }
+
+            # Send 2 consecutive packets: DynamoDB scan should only happen ONCE due to cache
+            res1 = messageMod.lambda_handler(event, None)
+            res2 = messageMod.lambda_handler(event, None)
+
+        self.assertEqual(res1["statusCode"], 200)
+        self.assertEqual(res2["statusCode"], 200)
+        # Only 1 DynamoDB scan across 2 voice packets
+        mockTable.scan.assert_called_once()
+        # EventBridge put_events NOT called at all (ENABLE_AUDIO_ARCHIVAL=false)
+        mockEvents.put_events.assert_not_called()
+
+        stats = json.loads(res1["body"])["broadcast"]
+        # Only conn-nearby should receive it; conn-far and conn-other-server are skipped
+        self.assertEqual(stats["sent"], 1)
+        self.assertEqual(stats["skippedRoomOrProximity"], 2)
+
 
 class TestProcessAudioLambda(unittest.TestCase):
     """Tests for functions/process_audio/lambda_function.py."""

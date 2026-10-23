@@ -25,6 +25,7 @@ resource "aws_lambda_function" "process_audio" {
   role             = var.lambda_role_arn
   handler          = "lambda_function.lambda_handler"
   runtime          = var.lambda_runtime
+  architectures    = [var.lambda_architecture]
   timeout          = var.process_audio_timeout
   memory_size      = var.process_audio_memory
 
@@ -51,6 +52,7 @@ resource "aws_lambda_function" "validate_audio" {
   role             = var.lambda_role_arn
   handler          = "lambda_function.lambda_handler"
   runtime          = var.lambda_runtime
+  architectures    = [var.lambda_architecture]
   timeout          = var.validate_audio_timeout
   memory_size      = var.validate_audio_memory
 
@@ -80,6 +82,7 @@ resource "aws_lambda_function" "connect" {
   role             = var.lambda_role_arn
   handler          = "lambda_function.lambda_handler"
   runtime          = var.lambda_runtime
+  architectures    = [var.lambda_architecture]
   timeout          = var.websocket_timeout
   memory_size      = var.websocket_memory
 
@@ -104,6 +107,7 @@ resource "aws_lambda_function" "disconnect" {
   role             = var.lambda_role_arn
   handler          = "lambda_function.lambda_handler"
   runtime          = var.lambda_runtime
+  architectures    = [var.lambda_architecture]
   timeout          = var.websocket_timeout
   memory_size      = var.websocket_memory
 
@@ -128,16 +132,19 @@ resource "aws_lambda_function" "message" {
   role             = var.lambda_role_arn
   handler          = "lambda_function.lambda_handler"
   runtime          = var.lambda_runtime
+  architectures    = [var.lambda_architecture]
   timeout          = var.websocket_timeout
   memory_size      = var.websocket_memory
 
   environment {
     variables = {
-      CONNECTIONS_TABLE = "${var.project_name}-${var.stage}-connections"
-      EVENT_BUS_NAME    = var.event_bus_name
-      EVENT_SOURCE      = var.event_source
-      DIRECT_BROADCAST  = tostring(var.enable_direct_broadcast)
-      ECHO_MODE         = tostring(var.enable_echo_mode)
+      CONNECTIONS_TABLE     = "${var.project_name}-${var.stage}-connections"
+      EVENT_BUS_NAME        = var.event_bus_name
+      EVENT_SOURCE          = var.event_source
+      DIRECT_BROADCAST      = tostring(var.enable_direct_broadcast)
+      ENABLE_AUDIO_ARCHIVAL = tostring(var.enable_audio_archival)
+      ECHO_MODE             = tostring(var.enable_echo_mode)
+      MAX_VOICE_DISTANCE    = tostring(var.max_voice_distance)
     }
   }
 
@@ -156,6 +163,7 @@ resource "aws_lambda_function" "authorizer" {
   role             = var.lambda_role_arn
   handler          = "lambda_function.lambda_handler"
   runtime          = var.lambda_runtime
+  architectures    = [var.lambda_architecture]
   timeout          = var.websocket_timeout
   memory_size      = var.websocket_memory
 
